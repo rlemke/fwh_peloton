@@ -36,7 +36,7 @@ def main() -> int:
     ap.add_argument("--sam-model", default="mobile_sam.pt", help="SAM weights")
     ap.add_argument("--no-face-restore", action="store_true", help="skip face restoration")
     ap.add_argument("--fidelity", type=float, default=0.7, help="face-restore identity fidelity (0..1)")
-    ap.add_argument("--model", default="yolov8n.pt", help="YOLO weights")
+    ap.add_argument("--model", default="yolo11x.pt", help="YOLO weights")
     ap.add_argument("--upscale-backend", default="auto", help="auto|realesrgan-ncnn|realesrgan|lanczos")
     ap.add_argument("--face-backend", default="auto", help="auto|gfpgan|codeformer|none")
     ap.add_argument("--use-mock", action="store_true", help="offline deterministic detector (no models)")

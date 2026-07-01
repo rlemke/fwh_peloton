@@ -52,7 +52,11 @@ python process_photo.py --image group.jpg --out-dir out/ --require-bike --scale 
 The pipeline **always** produces output; ML backends are best-effort, and each
 run records which one actually ran (`upscale_backend`, `face_backend`):
 
-- **detect** — Ultralytics YOLO (`.[detect]`). `--use-mock` = deterministic offline boxes.
+- **detect** — Ultralytics YOLO (`.[detect]`), default `yolo11x.pt` (x-large). The
+  nano model misses many bicycles → `--require-bike` drops real riders; on a
+  23-photo sample yolo11x recovered 35 riders-with-bike that nano missed (0). Use
+  `--model yolo11n.pt`/`yolov8n.pt` for a faster, lower-recall run. `--use-mock` =
+  deterministic offline boxes.
 - **segment** (`--segment`) — box-prompted **SAM** (`mobile_sam.pt`, via ultralytics)
   cuts each rider out of the background. `--cutout-bg white|black|blur|transparent`
   (transparent → PNG with alpha). Falls back to a filled box if SAM finds nothing.

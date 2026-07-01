@@ -108,7 +108,7 @@ def detect_riders(
     require_bike: bool = False,
     min_pair_iou: float = 0.02,
     backend: str = "yolo",
-    model: str = "yolov8n.pt",
+    model: str = "yolo11x.pt",
     use_mock: bool = False,
 ) -> list[Rider]:
     """Detect riders in a ``PIL.Image``. Returns riders sorted largest-first

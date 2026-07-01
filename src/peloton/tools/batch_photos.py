@@ -42,7 +42,7 @@ def main() -> int:
     ap.add_argument("--sam-model", default="mobile_sam.pt")
     ap.add_argument("--no-face-restore", action="store_true")
     ap.add_argument("--fidelity", type=float, default=0.7)
-    ap.add_argument("--model", default="yolov8n.pt")
+    ap.add_argument("--model", default="yolo11x.pt")
     ap.add_argument("--upscale-backend", default="auto")
     ap.add_argument("--face-backend", default="auto")
     ap.add_argument("--use-mock", action="store_true")

@@ -28,7 +28,7 @@ def main() -> int:
     ap.add_argument("--conf", type=float, default=0.25)
     ap.add_argument("--pad", type=float, default=0.15, help="crop padding fraction")
     ap.add_argument("--require-bike", action="store_true")
-    ap.add_argument("--model", default="yolov8n.pt")
+    ap.add_argument("--model", default="yolo11x.pt")
     ap.add_argument("--use-mock", action="store_true")
     ap.add_argument("--log-level", default="INFO")
     a = ap.parse_args()

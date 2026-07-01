@@ -27,7 +27,7 @@ def main() -> int:
     ap.add_argument("--image", required=True, help="input photo path")
     ap.add_argument("--conf", type=float, default=0.25, help="detector confidence threshold")
     ap.add_argument("--require-bike", action="store_true", help="only riders paired with a bicycle")
-    ap.add_argument("--model", default="yolov8n.pt", help="YOLO weights")
+    ap.add_argument("--model", default="yolo11x.pt", help="YOLO weights")
     ap.add_argument("--use-mock", action="store_true", help="offline deterministic detector")
     ap.add_argument("--log-level", default="INFO")
     a = ap.parse_args()

@@ -38,7 +38,7 @@ def process_photo(
     cutout_bg: str = "white",
     sam_model: str = "mobile_sam.pt",
     use_mock: bool = False,
-    detect_model: str = "yolov8n.pt",
+    detect_model: str = "yolo11x.pt",
     upscale_backend: str = "auto",
     face_backend: str = "auto",
 ) -> dict[str, Any]:
