@@ -62,7 +62,7 @@ def face_embeddings(img: Any, *, model: str = "buffalo_l",
     return [(f.normed_embedding, tuple(float(v) for v in f.bbox)) for f in faces]
 
 
-def cluster(embeddings: list[Any], *, threshold: float = 0.35) -> list[int]:
+def cluster(embeddings: list[Any], *, threshold: float = 0.5) -> list[int]:
     """Greedy online clustering by cosine similarity (embeddings are L2-normed, so
     cosine = dot). Returns a cluster id per embedding. ``threshold`` = min cosine
     similarity to join a cluster (higher = stricter / more clusters)."""

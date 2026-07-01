@@ -34,6 +34,22 @@ terminal and (later) from an FFL handler.
 | `crop-riders`    | Detect + crop each rider to its own image (no enhance) |
 | `enhance-image`  | Upscale + face-restore a single image |
 | `process-photo`  | The whole pipeline: photo → per-rider enhanced portraits |
+| `batch-photos`   | Run the pipeline over a whole directory (model reuse) |
+| `group-riders`   | Cluster the per-rider crops by face → one `rider_NNN/` folder per person, best-shot first |
+
+### Organize & identify (`group-riders`)
+
+Points at the crops from `batch-photos` and clusters them by face (InsightFace/
+ArcFace embeddings + cosine clustering) into one folder per rider, ranked
+best-shot first by a model-free quality score (`quality.py`: sharpness + exposure).
+Crops with no detectable face → `_no_face/`.
+
+> **Caveat — cyclists are hard for face recognition.** Helmets + sunglasses + distance
+> give weak, noisy embeddings, so grouping is a useful-but-imperfect first pass: it
+> reliably merges clear same-rider pairs but can over/under-merge ambiguous ones, and
+> ~7% of crops have no detectable face at all. `--threshold` tunes precision/recall
+> (default 0.5; 0.4 over-merges, 0.6 is stricter). **Bib-number OCR would identify
+> riders far more reliably** — a natural future addition.
 
 All tools: structured JSON on **stdout**, logs on **stderr**, `--use-mock` for an
 offline deterministic run (no models), `--log-level`.

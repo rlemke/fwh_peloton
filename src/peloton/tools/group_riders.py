@@ -42,7 +42,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Group per-rider crops by face recognition.")
     ap.add_argument("--in-dir", required=True, help="directory of per-rider crops (top level)")
     ap.add_argument("--out-dir", required=True, help="output: one rider_NNN/ folder per person")
-    ap.add_argument("--threshold", type=float, default=0.35,
+    ap.add_argument("--threshold", type=float, default=0.5,
                     help="min cosine similarity to join a group (higher = stricter)")
     ap.add_argument("--model", default="buffalo_l", help="InsightFace model")
     ap.add_argument("--min-size", type=int, default=1, help="drop groups smaller than this")
