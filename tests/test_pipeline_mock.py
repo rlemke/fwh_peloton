@@ -95,6 +95,29 @@ def test_framed_size_is_exact(photo, tmp_path):
         assert r["outputs"][0]["output_size"] == [400, 500]   # exact target size
 
 
+def test_framed_sharpen_increases_crispness(tmp_path):
+    # A framed output is downscaled to fit the target, softening the upscale;
+    # sharpen_framed>0 must recover crispness. Needs a textured photo (unsharp is
+    # a no-op on the flat mock fixture).
+    import numpy as np
+    from PIL import Image
+
+    from _peloton_tools import quality
+    rng = np.random.default_rng(7)
+    p = tmp_path / "textured.jpg"
+    Image.fromarray(rng.integers(0, 256, (600, 900, 3)).astype("uint8")).save(p)
+
+    def run(strength, sub):
+        s = pipeline.process_photo(
+            p, tmp_path / sub, use_mock=True, scale=2, restore_faces=False,
+            frame="framed", out_size=(400, 500), upscale_backend="lanczos",
+            sharpen_framed=strength)
+        return Image.open(s["riders"][0]["outputs"][0]["output"])
+
+    soft, sharp = run(0.0, "soft"), run(150.0, "sharp")
+    assert quality.focus_score(sharp) > quality.focus_score(soft)
+
+
 def test_framed_needs_aspect(photo, tmp_path):
     # a framed run with no aspect/out_size is a usage error
     with pytest.raises(ValueError):

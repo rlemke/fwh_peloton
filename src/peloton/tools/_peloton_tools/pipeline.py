@@ -41,6 +41,7 @@ def process_photo(
     out_size: tuple[int, int] | None = None,
     frame: str = "single",
     pad_color: str = "white",
+    sharpen_framed: float = 130.0,
     use_mock: bool = False,
     detect_model: str = "yolo11x.pt",
     upscale_backend: str = "auto",
@@ -56,6 +57,12 @@ def process_photo(
     no distortion), or ``both``. ``aspect`` = w/h ratio; ``out_size`` = exact
     (w, h) pixels (implies the ratio); ``pad_color`` fills any residual when the
     photo edge is reached (name/#hex/``blur``).
+
+    sharpen_framed — unsharp-mask strength (percent) applied to a framed output
+    *after* it is fit to the target size. The fit is a downscale of the 4x
+    upscaled region, which softens the Real-ESRGAN sharpening; this recovers it.
+    0 disables. Only framed outputs are sharpened (the tight ``single`` crop is
+    never downscaled, so it needs none).
     """
     target_ar = aspect or (out_size[0] / out_size[1] if out_size else None)
     kinds = (["single", "framed"] if frame == "both"
@@ -90,6 +97,19 @@ def process_photo(
             up.putalpha(alpha.resize(up.size, Image.LANCZOS))
         return up, ub, fb, alpha is not None
 
+    def _sharpen(im: Any) -> Any:
+        """Unsharp-mask to recover crispness lost in the fit-to-size downscale."""
+        if sharpen_framed <= 0:
+            return im
+        from PIL import ImageFilter  # noqa: PLC0415
+        mask = ImageFilter.UnsharpMask(radius=2.2, percent=int(sharpen_framed), threshold=2)
+        if im.mode == "RGBA":  # sharpen colour, keep alpha
+            a = im.getchannel("A")
+            im = im.convert("RGB").filter(mask).convert("RGBA")
+            im.putalpha(a)
+            return im
+        return im.filter(mask)
+
     results: list[dict[str, Any]] = []
     for r in riders:
         base = r.focus_box(pad_frac, w, h)
@@ -106,13 +126,18 @@ def process_photo(
             else:  # framed — expand OUTWARD to the target aspect, then size/pad
                 abox, needs_pad = _crop.aspect_box(base, target_ar, w, h)
                 up, ub, fb, is_rgba = _enhance_crop(img.crop(tuple(int(v) for v in abox)))
+                fitted = False
                 if out_size:
-                    up = _images.fit_to_size(up, out_size, color=pad_color); is_rgba = False
+                    up = _images.fit_to_size(up, out_size, color=pad_color)
+                    is_rgba, fitted = False, True
                 elif needs_pad or abs(up.width / up.height - target_ar) > 0.01:
                     W2, H2 = up.size
                     tgt = ((round(H2 * target_ar), H2) if W2 / H2 < target_ar
                            else (W2, round(W2 / target_ar)))
-                    up = _images.fit_to_size(up, tgt, color=pad_color); is_rgba = False
+                    up = _images.fit_to_size(up, tgt, color=pad_color)
+                    is_rgba, fitted = False, True
+                if fitted:
+                    up = _sharpen(up)
 
             suffix = f"_{kind}" if len(kinds) > 1 else ""
             out_path = out / f"{src.stem}_rider{r.index:02d}{suffix}.{'png' if is_rgba else 'jpg'}"
