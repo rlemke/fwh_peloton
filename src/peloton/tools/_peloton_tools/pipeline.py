@@ -42,6 +42,7 @@ def process_photo(
     frame: str = "single",
     pad_color: str = "white",
     sharpen_framed: float = 130.0,
+    dpi: int = 300,
     use_mock: bool = False,
     detect_model: str = "yolo11x.pt",
     upscale_backend: str = "auto",
@@ -63,6 +64,10 @@ def process_photo(
     upscaled region, which softens the Real-ESRGAN sharpening; this recovers it.
     0 disables. Only framed outputs are sharpened (the tight ``single`` crop is
     never downscaled, so it needs none).
+
+    dpi — print resolution embedded in framed outputs so they print at their
+    intended physical size (e.g. 1200x1800 @ 300 dpi = 4x6"). The tight ``single``
+    crop is a variable-size digital view, so it is left untagged.
     """
     target_ar = aspect or (out_size[0] / out_size[1] if out_size else None)
     kinds = (["single", "framed"] if frame == "both"
@@ -141,7 +146,7 @@ def process_photo(
 
             suffix = f"_{kind}" if len(kinds) > 1 else ""
             out_path = out / f"{src.stem}_rider{r.index:02d}{suffix}.{'png' if is_rgba else 'jpg'}"
-            _images.save_image(up, out_path)
+            _images.save_image(up, out_path, dpi=dpi if kind == "framed" else None)
             outs.append({"kind": kind, "output": str(out_path),
                          "output_size": list(_images.size(up)),
                          "upscale_backend": ub, "face_backend": fb})

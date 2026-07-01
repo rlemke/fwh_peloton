@@ -39,6 +39,8 @@ def main() -> int:
     ap.add_argument("--pad-color", default="white", help="fill at the photo edge: name|#hex|blur")
     ap.add_argument("--sharpen-framed", type=float, default=130.0,
                     help="unsharp %% on framed outputs after fit-to-size (0 disables)")
+    ap.add_argument("--dpi", type=int, default=300,
+                    help="print DPI embedded in framed outputs (1200x1800 @ 300 = 4x6\")")
     ap.add_argument("--segment", action="store_true", help="SAM cutout each rider (mask, not bbox)")
     ap.add_argument("--cutout-bg", default="white", help="segment background: white|black|blur|transparent")
     ap.add_argument("--sam-model", default="mobile_sam.pt", help="SAM weights")
@@ -61,7 +63,7 @@ def main() -> int:
             a.image, a.out_dir, conf=a.conf, pad_frac=a.pad,
             require_bike=a.require_bike, scale=a.scale,
             aspect=aspect, out_size=out_size, frame=frame, pad_color=a.pad_color,
-            sharpen_framed=a.sharpen_framed,
+            sharpen_framed=a.sharpen_framed, dpi=a.dpi,
             segment=a.segment, cutout_bg=a.cutout_bg, sam_model=a.sam_model,
             restore_faces=not a.no_face_restore, fidelity=a.fidelity,
             use_mock=a.use_mock, detect_model=a.model,

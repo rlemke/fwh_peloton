@@ -118,6 +118,18 @@ def test_framed_sharpen_increases_crispness(tmp_path):
     assert quality.focus_score(sharp) > quality.focus_score(soft)
 
 
+def test_framed_embeds_dpi_single_does_not(photo, tmp_path):
+    from PIL import Image
+    out = tmp_path / "dpi"
+    summary = pipeline.process_photo(
+        photo, out, use_mock=True, scale=2, restore_faces=False,
+        frame="both", out_size=(400, 600), upscale_backend="lanczos", dpi=300)
+    for r in summary["riders"]:
+        by_kind = {o["kind"]: o["output"] for o in r["outputs"]}
+        assert Image.open(by_kind["framed"]).info.get("dpi") == (300, 300)
+        assert Image.open(by_kind["single"]).info.get("dpi") is None
+
+
 def test_framed_needs_aspect(photo, tmp_path):
     # a framed run with no aspect/out_size is a usage error
     with pytest.raises(ValueError):

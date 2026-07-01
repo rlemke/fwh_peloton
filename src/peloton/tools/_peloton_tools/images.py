@@ -90,8 +90,14 @@ def _load_raw(path: Path) -> Any:
     return Image.fromarray(np.ascontiguousarray(rgb)).convert("RGB")
 
 
-def save_image(img: Any, path: str | Path, quality: int = 92) -> Path:
-    """Save an image, creating parent dirs. JPEG by extension, else PNG-ish."""
+def save_image(img: Any, path: str | Path, quality: int = 92,
+               dpi: int | None = None) -> Path:
+    """Save an image, creating parent dirs. JPEG by extension, else PNG-ish.
+
+    dpi — embed a print resolution (both axes). At a given dpi the physical print
+    size is pixels/dpi, so a 1200x1800 image tagged 300 dpi prints as 4x6 inches;
+    without the tag a print service assumes ~72 dpi and blows it up.
+    """
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     params: dict[str, Any] = {}
@@ -99,6 +105,8 @@ def save_image(img: Any, path: str | Path, quality: int = 92) -> Path:
         params = {"quality": quality, "optimize": True}
         if img.mode != "RGB":
             img = img.convert("RGB")
+    if dpi:
+        params["dpi"] = (dpi, dpi)
     img.save(p, **params)
     log.debug("wrote %s (%dx%d)", p, img.width, img.height)
     return p
