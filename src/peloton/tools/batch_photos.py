@@ -21,9 +21,10 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _peloton_tools import crop, pipeline  # noqa: E402
+from _peloton_tools import crop, images, pipeline  # noqa: E402
 
-_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff", ".heic", ".heif"}
+_EXTS = ({".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff", ".heic", ".heif"}
+         | images.RAW_EXTS)
 log = logging.getLogger("peloton.batch")
 
 

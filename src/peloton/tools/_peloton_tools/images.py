@@ -52,9 +52,42 @@ def load_image(path: str | Path) -> Any:
     p = Path(path)
     if not p.is_file():
         raise FileNotFoundError(f"image not found: {p}")
+    if p.suffix.lower() in RAW_EXTS:
+        return _load_raw(p)                      # camera RAW → demosaiced RGB
     img = Image.open(p)
     img = ImageOps.exif_transpose(img)  # honour camera rotation
     return img.convert("RGB")
+
+
+# Camera RAW formats decoded via rawpy/LibRaw (orientation applied in postprocess).
+RAW_EXTS = {".nef", ".nrw",            # Nikon
+            ".cr2", ".cr3", ".crw",     # Canon
+            ".arw", ".srf", ".sr2",     # Sony
+            ".dng",                     # Adobe / DJI / others
+            ".raf",                     # Fujifilm
+            ".orf",                     # Olympus
+            ".rw2",                     # Panasonic
+            ".pef",                     # Pentax
+            ".srw"}                     # Samsung
+
+
+def _load_raw(path: Path) -> Any:
+    """Decode a camera RAW file to an 8-bit RGB ``PIL.Image`` (camera white
+    balance, auto-brightness, orientation applied by LibRaw)."""
+    try:
+        import rawpy  # noqa: PLC0415
+    except ImportError as exc:
+        raise RuntimeError(
+            f"{path.suffix} is a camera RAW format — needs rawpy. "
+            "Install it: pip install '.[raw]'  (or: pip install rawpy)"
+        ) from exc
+    import numpy as np  # noqa: PLC0415
+
+    Image = _pil()
+    with rawpy.imread(str(path)) as raw:
+        rgb = raw.postprocess(use_camera_wb=True, no_auto_bright=False, output_bps=8)
+    log.debug("decoded RAW %s (%dx%d)", path.name, rgb.shape[1], rgb.shape[0])
+    return Image.fromarray(np.ascontiguousarray(rgb)).convert("RGB")
 
 
 def save_image(img: Any, path: str | Path, quality: int = 92) -> Path:

@@ -26,6 +26,7 @@ detect = ["ultralytics>=8.1"]
 enhance = ["spandrel>=0.3", "spandrel_extra_arches>=0.2", "gfpgan>=1.3"]  # extra_arches = CodeFormer (non-commercial license)
 # Same-rider grouping: face embeddings (ArcFace) + clustering.
 recognize = ["insightface>=0.7", "onnxruntime>=1.16"]
+raw = ["rawpy>=0.19"]  # decode camera RAW (.nef/.cr2/.arw/.dng/…)
 s3 = ["boto3>=1.28"]
 test = ["pytest>=7.4"]
 

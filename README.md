@@ -14,6 +14,11 @@ A Facetwork domain package following the tools/handlers pattern. This first cut
 ships the reusable **library + CLI tools** (`src/peloton/tools/`); the FFL
 handlers/workflow are the next phase.
 
+**Input formats:** JPEG/PNG/WebP/TIFF/BMP, iPhone **HEIC/HEIF** (via `pillow-heif`,
+core dep), and camera **RAW** — `.nef` (Nikon), `.cr2/.cr3` (Canon), `.arw` (Sony),
+`.dng`, `.raf`, `.orf`, `.rw2`, … (via `rawpy`/LibRaw — `pip install '.[raw]'`).
+A folder may mix any of these; each file is decoded by its own format.
+
 ## Quick start
 
 ```bash
