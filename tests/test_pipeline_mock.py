@@ -47,6 +47,31 @@ def test_process_photo_writes_one_output_per_rider(photo, tmp_path):
     assert len(list(out.glob("group_rider*.jpg"))) == 3
 
 
+def test_process_photo_segment_mock_writes_cutouts(photo, tmp_path):
+    out = tmp_path / "seg"
+    summary = pipeline.process_photo(
+        photo, out, use_mock=True, scale=2, restore_faces=False,
+        segment=True, cutout_bg="white", upscale_backend="lanczos")
+    assert summary["n_riders"] == 3
+    for r in summary["riders"]:
+        assert r["segmented"] is True
+        assert r["cutout_bg"] == "white"
+        assert Path(r["output"]).is_file()
+    assert len(list(out.glob("*.jpg"))) == 3
+
+
+def test_process_photo_segment_transparent_is_png(photo, tmp_path):
+    out = tmp_path / "seg_t"
+    summary = pipeline.process_photo(
+        photo, out, use_mock=True, scale=2, restore_faces=False,
+        segment=True, cutout_bg="transparent", upscale_backend="lanczos")
+    from PIL import Image
+    for r in summary["riders"]:
+        p = Path(r["output"])
+        assert p.suffix == ".png"
+        assert Image.open(p).mode == "RGBA"
+
+
 def test_focus_box_stays_in_bounds(photo):
     from _peloton_tools import images
     img = images.load_image(photo)

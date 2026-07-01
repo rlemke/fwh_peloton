@@ -66,3 +66,32 @@ def crop_box(img: Any, box: Box) -> Any:
     """Crop ``img`` (a ``PIL.Image``) to an integer, in-bounds box."""
     x1, y1, x2, y2 = clamp_box(box, img.width, img.height)
     return img.crop((x1, y1, x2, y2))
+
+
+def cutout(img: Any, mask: Any, box: Box, *, bg: str = "white", feather: int = 2) -> Any:
+    """Crop to ``box`` and knock out everything outside ``mask`` (a boolean
+    ``HxW`` array over the full image).
+
+    ``bg``: ``white`` / ``black`` / ``blur`` → composited RGB; ``transparent`` →
+    RGBA with the mask as alpha. ``feather`` softens the mask edge (px).
+    """
+    import numpy as np  # noqa: PLC0415
+    from PIL import Image, ImageFilter  # noqa: PLC0415
+
+    x1, y1, x2, y2 = clamp_box(box, img.width, img.height)
+    sub = img.crop((x1, y1, x2, y2)).convert("RGB")
+    sub_mask = np.ascontiguousarray(mask[y1:y2, x1:x2]).astype("uint8") * 255
+    alpha = Image.fromarray(sub_mask, mode="L")
+    if feather > 0:
+        alpha = alpha.filter(ImageFilter.GaussianBlur(feather))
+
+    if bg == "transparent":
+        out = sub.convert("RGBA")
+        out.putalpha(alpha)
+        return out
+    if bg == "blur":
+        base = sub.filter(ImageFilter.GaussianBlur(12))
+    else:
+        color = (0, 0, 0) if bg == "black" else (255, 255, 255)
+        base = Image.new("RGB", sub.size, color)
+    return Image.composite(sub, base, alpha)

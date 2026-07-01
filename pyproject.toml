@@ -22,7 +22,7 @@ detect = ["ultralytics>=8.1"]
 # enhance.py bridges modern torchvision). Weights auto-download to
 # ~/.cache/peloton/weights (RealESRGAN_x4plus.pth, GFPGANv1.4.pth). The pipeline
 # falls back to Lanczos upscale + passthrough when these are absent.
-enhance = ["spandrel>=0.3", "gfpgan>=1.3"]
+enhance = ["spandrel>=0.3", "spandrel_extra_arches>=0.2", "gfpgan>=1.3"]  # extra_arches = CodeFormer (non-commercial license)
 s3 = ["boto3>=1.28"]
 test = ["pytest>=7.4"]
 

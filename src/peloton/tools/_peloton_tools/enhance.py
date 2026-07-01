@@ -174,6 +174,8 @@ def restore_faces(img: Any, fidelity: float = 0.7, backend: str = "auto") -> tup
         try:
             if b == "gfpgan":
                 out = _restore_gfpgan(img, fidelity)
+            elif b == "codeformer":
+                out = _restore_codeformer(img, fidelity)
             elif b in ("none", "passthrough"):
                 out = img
             else:
@@ -231,3 +233,73 @@ def _restore_gfpgan(img: Any, fidelity: float) -> Any | None:
     if restored is None:
         return None
     return Image.fromarray(restored[:, :, ::-1])
+
+
+_CODEFORMER_CACHE: dict[str, Any] = {}
+
+
+def _face_device() -> str:
+    """Face detect/restore on CPU by default — retinaface/CodeFormer hit MPS op
+    gaps. Override with FW_PELOTON_FACE_DEVICE."""
+    return os.environ.get("FW_PELOTON_FACE_DEVICE", "cpu")
+
+
+def _get_codeformer(weights: str, device: str) -> Any:
+    if weights in _CODEFORMER_CACHE:
+        return _CODEFORMER_CACHE[weights]
+    import spandrel_extra_arches  # noqa: PLC0415
+    from spandrel import ModelLoader  # noqa: PLC0415
+    spandrel_extra_arches.install()
+    net = ModelLoader().load_from_file(weights).model.to(device).eval()
+    log.info("loaded CodeFormer %s on %s", Path(weights).name, device)
+    _CODEFORMER_CACHE[weights] = net
+    return net
+
+
+def _restore_codeformer(img: Any, fidelity: float) -> Any | None:
+    """CodeFormer face restoration — facexlib align/paste + the CodeFormer net
+    (spandrel_extra_arches). ``fidelity`` maps to CodeFormer's ``weight`` (higher
+    = more faithful to the input, lower = stronger restoration). Returns None
+    (→ passthrough) if libs/weights are absent, or the input if no face is found.
+    """
+    import sys  # noqa: PLC0415
+    try:
+        import torchvision.transforms.functional as _tvf  # noqa: PLC0415
+        sys.modules.setdefault("torchvision.transforms.functional_tensor", _tvf)
+        import spandrel_extra_arches  # noqa: F401,PLC0415
+        from basicsr.utils import img2tensor, tensor2img  # noqa: PLC0415
+        from facexlib.utils.face_restoration_helper import (  # noqa: PLC0415
+            FaceRestoreHelper)
+        from torchvision.transforms.functional import normalize  # noqa: PLC0415
+    except ImportError:
+        return None
+    weights = _weights_path("codeformer.pth", "FW_PELOTON_CODEFORMER_WEIGHTS")
+    if not os.path.isfile(weights):
+        log.warning("CodeFormer weights missing (%s) — passthrough", weights)
+        return None
+
+    import numpy as np  # noqa: PLC0415
+    import torch  # noqa: PLC0415
+    from PIL import Image  # noqa: PLC0415
+
+    device = _face_device()
+    net = _get_codeformer(weights, device)
+    helper = FaceRestoreHelper(1, face_size=512, crop_ratio=(1, 1),
+                               det_model="retinaface_resnet50", save_ext="png",
+                               use_parse=True, device=device)
+    helper.clean_all()
+    helper.read_image(np.asarray(img.convert("RGB"))[:, :, ::-1].copy())
+    if helper.get_face_landmarks_5(only_center_face=False, resize=640,
+                                   eye_dist_threshold=5) == 0:
+        return img  # no face — leave the crop unchanged
+    helper.align_warp_face()
+    for cf in helper.cropped_faces:
+        ft = img2tensor(cf / 255.0, bgr2rgb=True, float32=True)
+        normalize(ft, (0.5,) * 3, (0.5,) * 3, inplace=True)
+        with torch.no_grad():
+            out = net(ft.unsqueeze(0).to(device), weight=float(fidelity))
+            out = out[0] if isinstance(out, (tuple, list)) else out
+        helper.add_restored_face(
+            tensor2img(out.squeeze(0), rgb2bgr=True, min_max=(-1, 1)).astype("uint8"))
+    helper.get_inverse_affine(None)
+    return Image.fromarray(helper.paste_faces_to_input_image()[:, :, ::-1])

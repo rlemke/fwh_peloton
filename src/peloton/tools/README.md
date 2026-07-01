@@ -49,12 +49,19 @@ python process_photo.py --image group.jpg --out-dir out/ --require-bike --scale 
 
 ## Backends (graceful degradation)
 
-The pipeline **always** produces output; ML backends are best-effort:
+The pipeline **always** produces output; ML backends are best-effort, and each
+run records which one actually ran (`upscale_backend`, `face_backend`):
 
 - **detect** — Ultralytics YOLO (`.[detect]`). `--use-mock` = deterministic offline boxes.
-- **upscale** — `realesrgan-ncnn-vulkan` binary → `realesrgan` python → **Lanczos** (always).
-- **face-restore** — GFPGAN/CodeFormer → **passthrough** (always). Each run records
-  which backend actually ran (`upscale_backend`, `face_backend`).
+- **segment** (`--segment`) — box-prompted **SAM** (`mobile_sam.pt`, via ultralytics)
+  cuts each rider out of the background. `--cutout-bg white|black|blur|transparent`
+  (transparent → PNG with alpha). Falls back to a filled box if SAM finds nothing.
+- **upscale** — **Real-ESRGAN** via `spandrel` (plain torch, tiled, MPS/CUDA/CPU) →
+  `realesrgan-ncnn-vulkan` binary → **Lanczos** (always).
+- **face-restore** — `--face-backend gfpgan|codeformer` (both via facexlib align/paste;
+  CodeFormer's `--fidelity` = its `weight`, higher = more faithful) → **passthrough**.
+
+Weights auto-cache to `~/.cache/peloton/weights`. `pip install '.[detect,enhance]'`.
 
 ## Library (`_peloton_tools/`)
 
