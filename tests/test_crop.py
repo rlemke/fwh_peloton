@@ -41,3 +41,22 @@ def test_crop_box_dims_match(monkeypatch):
     img = Image.new("RGB", (100, 80), "white")
     out = crop.crop_box(img, (10, 10, 60, 50))
     assert out.size == (50, 40)
+
+
+def test_cutout_backgrounds():
+    import numpy as np
+    from PIL import Image
+    img = Image.new("RGB", (100, 100), (10, 20, 30))
+    mask = np.zeros((100, 100), dtype=bool)
+    mask[20:80, 20:80] = True
+
+    # solid hex colour outside the mask
+    red = crop.cutout(img, mask, (0, 0, 100, 100), bg="#ff0000", feather=0)
+    assert red.mode == "RGB" and red.size == (100, 100)
+    assert np.asarray(red)[0, 0].tolist() == [255, 0, 0]     # corner = red bg
+    assert np.asarray(red)[50, 50].tolist() == [10, 20, 30]  # centre = subject
+
+    # bokeh + transparent variants keep the right mode/size
+    assert crop.cutout(img, mask, (0, 0, 100, 100), bg="bokeh").mode == "RGB"
+    t = crop.cutout(img, mask, (0, 0, 100, 100), bg="transparent")
+    assert t.mode == "RGBA"

@@ -72,8 +72,13 @@ def cutout(img: Any, mask: Any, box: Box, *, bg: str = "white", feather: int = 2
     """Crop to ``box`` and knock out everything outside ``mask`` (a boolean
     ``HxW`` array over the full image).
 
-    ``bg``: ``white`` / ``black`` / ``blur`` → composited RGB; ``transparent`` →
-    RGBA with the mask as alpha. ``feather`` softens the mask edge (px).
+    ``bg``:
+      * ``transparent`` → RGBA with the mask as alpha (PNG)
+      * ``blur`` / ``bokeh`` → the crop's own background, gaussian-blurred (bokeh
+        is a stronger, size-relative blur for a portrait look)
+      * ``white`` / ``black`` / a colour (``#RRGGBB`` or a PIL colour name) → solid
+      * a path to an image file → that image, cover-fit behind the rider
+    ``feather`` softens the mask edge (px).
     """
     import numpy as np  # noqa: PLC0415
     from PIL import Image, ImageFilter  # noqa: PLC0415
@@ -89,9 +94,30 @@ def cutout(img: Any, mask: Any, box: Box, *, bg: str = "white", feather: int = 2
         out = sub.convert("RGBA")
         out.putalpha(alpha)
         return out
+    return Image.composite(sub, _background(sub, bg), alpha)
+
+
+def _background(sub: Any, bg: str) -> Any:
+    """The RGB backdrop for a cutout — see ``cutout``'s ``bg`` options."""
+    import os  # noqa: PLC0415
+
+    from PIL import Image, ImageColor, ImageFilter, ImageOps  # noqa: PLC0415
+
     if bg == "blur":
-        base = sub.filter(ImageFilter.GaussianBlur(12))
+        return sub.filter(ImageFilter.GaussianBlur(12))
+    if bg == "bokeh":
+        radius = max(10, min(sub.size) // 12)      # heavier, size-relative
+        return sub.filter(ImageFilter.GaussianBlur(radius))
+    if isinstance(bg, str) and os.path.isfile(bg):
+        return ImageOps.fit(Image.open(bg).convert("RGB"), sub.size,
+                            method=Image.LANCZOS)   # cover-fit the replacement
+    if bg == "white":
+        color: Any = (255, 255, 255)
+    elif bg == "black":
+        color = (0, 0, 0)
     else:
-        color = (0, 0, 0) if bg == "black" else (255, 255, 255)
-        base = Image.new("RGB", sub.size, color)
-    return Image.composite(sub, base, alpha)
+        try:
+            color = ImageColor.getrgb(bg)           # #RRGGBB or a colour name
+        except ValueError:
+            color = (255, 255, 255)
+    return Image.new("RGB", sub.size, color)
