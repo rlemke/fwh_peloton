@@ -43,6 +43,7 @@ def process_photo(
     pad_color: str = "white",
     sharpen_framed: float = 130.0,
     dpi: int = 300,
+    match_input: bool = False,
     use_mock: bool = False,
     detect_model: str = "yolo11x.pt",
     upscale_backend: str = "auto",
@@ -68,6 +69,13 @@ def process_photo(
     dpi — print resolution embedded in framed outputs so they print at their
     intended physical size (e.g. 1200x1800 @ 300 dpi = 4x6"). The tight ``single``
     crop is a variable-size digital view, so it is left untagged.
+
+    match_input — scale every output so its long edge equals the input photo's
+    long edge (a 24 MP source → a ~24 MP output). The framed target and its dpi
+    are scaled by the same factor, so the print size is unchanged (still 4x6")
+    just at higher resolution; the single crop is up-scaled to the same long edge.
+    NOTE: for a small/distant rider this interpolates beyond the detail actually
+    captured — big pixels, not new detail.
     """
     target_ar = aspect or (out_size[0] / out_size[1] if out_size else None)
     kinds = (["single", "framed"] if frame == "both"
@@ -82,6 +90,17 @@ def process_photo(
     img = _images.load_image(src)
     w, h = _images.size(img)
     log.info("loaded %s (%dx%d)", src.name, w, h)
+
+    long_edge = max(w, h)
+    if match_input and "framed" in kinds:
+        if out_size:  # scale pixels + dpi by the same k → same print size, more px
+            k = long_edge / max(out_size)
+            out_size = (max(1, round(out_size[0] * k)), max(1, round(out_size[1] * k)))
+            dpi = max(1, round(dpi * k))
+        else:  # aspect only → size the long dimension to the input long edge
+            out_size = ((round(long_edge * target_ar), long_edge) if target_ar < 1
+                        else (long_edge, round(long_edge / target_ar)))
+        log.info("match_input: framed → %dx%d @ %d dpi", out_size[0], out_size[1], dpi)
 
     riders = _detect.detect_riders(
         img, conf=conf, require_bike=require_bike,
@@ -115,6 +134,16 @@ def process_photo(
             return im
         return im.filter(mask)
 
+    def _to_long_edge(im: Any) -> Any:
+        """Scale so the long edge == the input long edge (match_input)."""
+        le = max(im.size)
+        if le == long_edge:
+            return im
+        from PIL import Image  # noqa: PLC0415
+        s = long_edge / le
+        return im.resize((max(1, round(im.width * s)), max(1, round(im.height * s))),
+                         Image.LANCZOS)
+
     results: list[dict[str, Any]] = []
     for r in riders:
         base = r.focus_box(pad_frac, w, h)
@@ -128,6 +157,11 @@ def process_photo(
                 else:
                     crop_img = img.crop(tuple(int(v) for v in base))
                 up, ub, fb, is_rgba = _enhance_crop(crop_img)
+                if match_input:
+                    upscaled = max(up.size) < long_edge
+                    up = _to_long_edge(up)                 # long edge == input (up or down)
+                    if upscaled:
+                        up = _sharpen(up)                  # interpolated up → recover crispness
             else:  # framed — expand OUTWARD to the target aspect, then size/pad
                 abox, needs_pad = _crop.aspect_box(base, target_ar, w, h)
                 up, ub, fb, is_rgba = _enhance_crop(img.crop(tuple(int(v) for v in abox)))

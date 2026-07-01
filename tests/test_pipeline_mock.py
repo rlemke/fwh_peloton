@@ -130,6 +130,25 @@ def test_framed_embeds_dpi_single_does_not(photo, tmp_path):
         assert Image.open(by_kind["single"]).info.get("dpi") is None
 
 
+def test_match_input_sets_long_edge_and_scales_dpi(tmp_path):
+    from PIL import Image
+    p = tmp_path / "big.jpg"
+    Image.new("RGB", (1200, 800), (90, 140, 200)).save(p)   # long edge 1200
+    out = tmp_path / "mi"
+    summary = pipeline.process_photo(
+        p, out, use_mock=True, scale=2, restore_faces=False, frame="both",
+        out_size=(400, 600), dpi=300, match_input=True, upscale_backend="lanczos")
+    for r in summary["riders"]:
+        by_kind = {o["kind"]: o for o in r["outputs"]}
+        fr, sg = by_kind["framed"], by_kind["single"]
+        # framed long edge == input long edge (1200), aspect 2:3 preserved → 800x1200
+        assert fr["output_size"] == [800, 1200]
+        # dpi scaled with pixels (300 * 1200/600 = 600) so physical size stays 4x6"
+        assert Image.open(fr["output"]).info.get("dpi") == (600, 600)
+        # single long edge also == input long edge
+        assert max(sg["output_size"]) == 1200
+
+
 def test_framed_needs_aspect(photo, tmp_path):
     # a framed run with no aspect/out_size is a usage error
     with pytest.raises(ValueError):
