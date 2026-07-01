@@ -23,12 +23,32 @@ def _pil():
     return Image
 
 
+_heif_registered = False
+
+
+def _ensure_heif() -> None:
+    """Register the HEIF/HEIC opener with Pillow (once) so iPhone .heic photos
+    open transparently. No-op if pillow-heif isn't installed (HEIC just won't
+    load, with Pillow's normal UnidentifiedImageError)."""
+    global _heif_registered
+    if _heif_registered:
+        return
+    _heif_registered = True
+    try:
+        import pillow_heif  # noqa: PLC0415
+        pillow_heif.register_heif_opener()
+        log.debug("registered HEIF/HEIC opener")
+    except ImportError:
+        log.debug("pillow-heif not installed — .heic files won't open")
+
+
 def load_image(path: str | Path) -> Any:
     """Load an image as an RGB ``PIL.Image``. EXIF-orientation is applied so
     portraits/landscapes come out upright."""
     Image = _pil()
     from PIL import ImageOps  # noqa: PLC0415
 
+    _ensure_heif()  # so .heic / .heif open like any other format
     p = Path(path)
     if not p.is_file():
         raise FileNotFoundError(f"image not found: {p}")
