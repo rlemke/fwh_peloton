@@ -127,9 +127,19 @@ def _run_tiled(model: Any, img: Any, tile: int = 384, overlap: int = 16) -> Any:
     out = np.zeros((H * s, W * s, 3), dtype=np.float32)
     acc = np.zeros((H * s, W * s, 1), dtype=np.float32)
     step = max(1, tile - overlap)
+    # Tile origins that guarantee FULL coverage: start every `step`, but always
+    # include a final tile flush against the right/bottom edge (W-tile / H-tile)
+    # so the last strip is never skipped (that left a black bottom-right corner).
+    def _starts(extent: int) -> list[int]:
+        xs = list(range(0, max(1, extent - tile + 1), step))
+        last = max(0, extent - tile)
+        if not xs or xs[-1] != last:
+            xs.append(last)
+        return xs
+
     with torch.no_grad():
-        for y in range(0, H, step):
-            for x in range(0, W, step):
+        for y in _starts(H):
+            for x in _starts(W):
                 y2, x2 = min(y + tile, H), min(x + tile, W)
                 patch = arr[y:y2, x:x2, :].transpose(2, 0, 1)
                 t = torch.from_numpy(patch)[None].to(device)
@@ -137,10 +147,12 @@ def _run_tiled(model: Any, img: Any, tile: int = 384, overlap: int = 16) -> Any:
                 oy, ox = y * s, x * s
                 out[oy:oy + r.shape[0], ox:ox + r.shape[1], :] += r
                 acc[oy:oy + r.shape[0], ox:ox + r.shape[1], :] += 1.0
-                if y2 >= H:
-                    break
-            if x2 >= W and y2 >= H:
-                pass
+    if float(acc.min()) == 0.0:  # coverage guard — never emit an unfilled (black) gap
+        log.warning("tiling left an uncovered region; filling from a plain resize")
+        base = np.asarray(img.resize((W * s, H * s), Image.LANCZOS), dtype=np.float32)
+        gap = (acc[:, :, 0] == 0)
+        out[gap] = base[gap]
+        acc[gap] = 1.0
     out = (out / np.maximum(acc, 1e-6) * 255.0).clip(0, 255).astype(np.uint8)
     return Image.fromarray(out)
 
