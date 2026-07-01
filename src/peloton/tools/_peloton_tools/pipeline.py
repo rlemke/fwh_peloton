@@ -37,16 +37,32 @@ def process_photo(
     segment: bool = False,
     cutout_bg: str = "white",
     sam_model: str = "mobile_sam.pt",
+    aspect: float | None = None,
+    out_size: tuple[int, int] | None = None,
+    frame: str = "single",
+    pad_color: str = "white",
     use_mock: bool = False,
     detect_model: str = "yolo11x.pt",
     upscale_backend: str = "auto",
     face_backend: str = "auto",
 ) -> dict[str, Any]:
-    """Process one photo. Returns a summary dict; writes one image per rider.
+    """Process one photo. Returns a summary dict; writes one or more images/rider.
 
-    segment — if True, SAM-mask each rider and cut them out of the background
-    (``cutout_bg``: white/black/blur/transparent) instead of a rectangular crop.
+    segment — SAM-mask each rider and cut them out of the background instead of a
+    rectangular crop (``cutout_bg``).
+
+    frame — ``single`` (tight rider crop), ``framed`` (expand the crop OUTWARD to
+    ``aspect``/``out_size`` — real surrounding pixels, may include other riders,
+    no distortion), or ``both``. ``aspect`` = w/h ratio; ``out_size`` = exact
+    (w, h) pixels (implies the ratio); ``pad_color`` fills any residual when the
+    photo edge is reached (name/#hex/``blur``).
     """
+    target_ar = aspect or (out_size[0] / out_size[1] if out_size else None)
+    kinds = (["single", "framed"] if frame == "both"
+             else ["framed"] if frame == "framed" else ["single"])
+    if "framed" in kinds and not target_ar:
+        raise ValueError("framed output needs aspect= or out_size=")
+
     src = Path(image_path)
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -60,49 +76,64 @@ def process_photo(
         backend="yolo", model=detect_model, use_mock=use_mock,
     )
 
-    results: list[dict[str, Any]] = []
-    for r in riders:
-        box = r.focus_box(pad_frac, w, h)
-        if segment:
-            # prompt SAM with the tight person∪bike box for an accurate mask,
-            # then cut the rider out within the padded focus box.
-            prompt = _crop.union(r.person_box, r.bike_box)
-            mask = _segment.segment_box(img, prompt, model=sam_model, use_mock=use_mock)
-            crop_img = _crop.cutout(img, mask, box, bg=cutout_bg)
-        else:
-            crop_img = img.crop(tuple(int(v) for v in box))
-
-        # A transparent cutout carries an alpha channel; enhance the RGB and
-        # re-attach a resized alpha at the end (upscale/face models want RGB).
+    def _enhance_crop(crop_img: Any) -> tuple[Any, str, str, bool]:
+        """crop → (alpha split) → upscale → face-restore → (alpha reattach)."""
         alpha = crop_img.getchannel("A") if crop_img.mode == "RGBA" else None
         rgb = crop_img.convert("RGB") if alpha is not None else crop_img
-
-        up_img, up_backend = _enhance.upscale(rgb, scale=scale, backend=upscale_backend)
-        face_backend_used = "skipped"
+        up, ub = _enhance.upscale(rgb, scale=scale, backend=upscale_backend)
+        fb = "skipped"
         if restore_faces:
-            up_img, face_backend_used = _enhance.restore_faces(
-                up_img, fidelity=fidelity, backend=face_backend)
-
-        ext = "jpg"
+            up, fb = _enhance.restore_faces(up, fidelity=fidelity, backend=face_backend)
         if alpha is not None:
             from PIL import Image  # noqa: PLC0415
-            up_img = up_img.convert("RGBA")
-            up_img.putalpha(alpha.resize(up_img.size, Image.LANCZOS))
-            ext = "png"
+            up = up.convert("RGBA")
+            up.putalpha(alpha.resize(up.size, Image.LANCZOS))
+        return up, ub, fb, alpha is not None
 
-        out_path = out / f"{src.stem}_rider{r.index:02d}.{ext}"
-        _images.save_image(up_img, out_path)
+    results: list[dict[str, Any]] = []
+    for r in riders:
+        base = r.focus_box(pad_frac, w, h)
+        outs: list[dict[str, Any]] = []
+        for kind in kinds:
+            if kind == "single":
+                if segment:
+                    prompt = _crop.union(r.person_box, r.bike_box)
+                    mask = _segment.segment_box(img, prompt, model=sam_model, use_mock=use_mock)
+                    crop_img = _crop.cutout(img, mask, base, bg=cutout_bg)
+                else:
+                    crop_img = img.crop(tuple(int(v) for v in base))
+                up, ub, fb, is_rgba = _enhance_crop(crop_img)
+            else:  # framed — expand OUTWARD to the target aspect, then size/pad
+                abox, needs_pad = _crop.aspect_box(base, target_ar, w, h)
+                up, ub, fb, is_rgba = _enhance_crop(img.crop(tuple(int(v) for v in abox)))
+                if out_size:
+                    up = _images.fit_to_size(up, out_size, color=pad_color); is_rgba = False
+                elif needs_pad or abs(up.width / up.height - target_ar) > 0.01:
+                    W2, H2 = up.size
+                    tgt = ((round(H2 * target_ar), H2) if W2 / H2 < target_ar
+                           else (W2, round(W2 / target_ar)))
+                    up = _images.fit_to_size(up, tgt, color=pad_color); is_rgba = False
+
+            suffix = f"_{kind}" if len(kinds) > 1 else ""
+            out_path = out / f"{src.stem}_rider{r.index:02d}{suffix}.{'png' if is_rgba else 'jpg'}"
+            _images.save_image(up, out_path)
+            outs.append({"kind": kind, "output": str(out_path),
+                         "output_size": list(_images.size(up)),
+                         "upscale_backend": ub, "face_backend": fb})
+            log.info("rider %02d [%s] → %s", r.index, kind, out_path.name)
+
+        first = outs[0]
         results.append({
             **r.to_dict(),
-            "focus_box": [int(v) for v in box],
+            "focus_box": [int(v) for v in base],
             "segmented": segment,
             **({"cutout_bg": cutout_bg} if segment else {}),
-            "output": str(out_path),
-            "output_size": list(_images.size(up_img)),
-            "upscale_backend": up_backend,
-            "face_backend": face_backend_used,
+            "outputs": outs,
+            "output": first["output"],          # back-compat: primary output
+            "output_size": first["output_size"],
+            "upscale_backend": first["upscale_backend"],
+            "face_backend": first["face_backend"],
         })
-        log.info("rider %02d → %s", r.index, out_path.name)
 
     summary = {
         "source": str(src),

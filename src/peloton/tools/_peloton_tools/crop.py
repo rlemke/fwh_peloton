@@ -12,6 +12,22 @@ from typing import Any
 Box = tuple[float, float, float, float]
 
 
+def parse_aspect(s: str) -> float:
+    """``'4:5'`` / ``'4/5'`` / ``'0.8'`` → aspect ratio (w/h)."""
+    s = s.strip()
+    for sep in (":", "/"):
+        if sep in s:
+            a, b = s.split(sep)
+            return float(a) / float(b)
+    return float(s)
+
+
+def parse_size(s: str) -> tuple[int, int]:
+    """``'1080x1350'`` → ``(1080, 1350)``."""
+    w, h = s.lower().replace(" ", "").split("x")
+    return int(w), int(h)
+
+
 def clamp_box(box: Box, width: int, height: int) -> Box:
     """Clamp a box to the image bounds and to integer pixels."""
     x1, y1, x2, y2 = box
@@ -66,6 +82,35 @@ def crop_box(img: Any, box: Box) -> Any:
     """Crop ``img`` (a ``PIL.Image``) to an integer, in-bounds box."""
     x1, y1, x2, y2 = clamp_box(box, img.width, img.height)
     return img.crop((x1, y1, x2, y2))
+
+
+def aspect_box(box: Box, target_ar: float, width: int, height: int) -> tuple[Box, bool]:
+    """Grow ``box`` OUTWARD to the aspect ratio ``target_ar`` (= w/h), centred on
+    the box, then slid to stay inside the image — so a rider keeps their true
+    proportions and the extra area is filled with real surrounding pixels (which
+    may include other riders), not distortion.
+
+    Returns ``(new_box, needs_pad)``. ``needs_pad`` is True when the image itself
+    is too small to reach ``target_ar`` (the caller pads the remainder).
+    """
+    x1, y1, x2, y2 = box
+    bw, bh = max(1.0, x2 - x1), max(1.0, y2 - y1)
+    if bw / bh < target_ar:          # too tall → widen
+        nw, nh = bh * target_ar, bh
+    else:                            # too wide → heighten
+        nw, nh = bw, bw / target_ar
+    cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
+    nx1, ny1, nx2, ny2 = cx - nw / 2, cy - nh / 2, cx + nw / 2, cy + nh / 2
+    if nx1 < 0:
+        nx2 -= nx1; nx1 = 0.0
+    if ny1 < 0:
+        ny2 -= ny1; ny1 = 0.0
+    if nx2 > width:
+        nx1 -= (nx2 - width); nx2 = float(width)
+    if ny2 > height:
+        ny1 -= (ny2 - height); ny2 = float(height)
+    needs_pad = (nw > width + 0.5) or (nh > height + 0.5)
+    return clamp_box((max(0.0, nx1), max(0.0, ny1), nx2, ny2), width, height), needs_pad
 
 
 def cutout(img: Any, mask: Any, box: Box, *, bg: str = "white", feather: int = 2) -> Any:

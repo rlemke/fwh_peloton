@@ -72,6 +72,35 @@ def test_process_photo_segment_transparent_is_png(photo, tmp_path):
         assert Image.open(p).mode == "RGBA"
 
 
+def test_frame_both_writes_single_and_framed(photo, tmp_path):
+    out = tmp_path / "fr"
+    summary = pipeline.process_photo(
+        photo, out, use_mock=True, scale=2, restore_faces=False,
+        frame="both", aspect=0.8, upscale_backend="lanczos")
+    for r in summary["riders"]:
+        kinds = {o["kind"] for o in r["outputs"]}
+        assert kinds == {"single", "framed"}
+        for o in r["outputs"]:
+            assert Path(o["output"]).is_file()
+    assert len(list(out.glob("*_single.jpg"))) == 3
+    assert len(list(out.glob("*_framed.jpg"))) == 3
+
+
+def test_framed_size_is_exact(photo, tmp_path):
+    out = tmp_path / "sz"
+    summary = pipeline.process_photo(
+        photo, out, use_mock=True, scale=2, restore_faces=False,
+        frame="framed", out_size=(400, 500), upscale_backend="lanczos")
+    for r in summary["riders"]:
+        assert r["outputs"][0]["output_size"] == [400, 500]   # exact target size
+
+
+def test_framed_needs_aspect(photo, tmp_path):
+    # a framed run with no aspect/out_size is a usage error
+    with pytest.raises(ValueError):
+        pipeline.process_photo(photo, tmp_path / "e", use_mock=True, frame="framed")
+
+
 def test_focus_box_stays_in_bounds(photo):
     from _peloton_tools import images
     img = images.load_image(photo)

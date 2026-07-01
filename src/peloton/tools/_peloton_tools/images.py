@@ -74,3 +74,29 @@ def save_image(img: Any, path: str | Path, quality: int = 92) -> Path:
 def size(img: Any) -> tuple[int, int]:
     """(width, height)."""
     return int(img.width), int(img.height)
+
+
+def fit_to_size(img: Any, target: tuple[int, int], color: str = "white") -> Any:
+    """Scale ``img`` to exactly ``target`` (w, h) preserving aspect — never
+    distorting — padding any residual with ``color`` (a name/#hex, or ``blur``)."""
+    Image = _pil()
+    from PIL import ImageColor, ImageOps  # noqa: PLC0415
+
+    tw, th = target
+    if color == "blur":
+        base = ImageOps.fit(img.convert("RGB"), (tw, th), method=Image.LANCZOS)
+        base = base.filter(_gaussian(max(12, min(tw, th) // 12)))
+        fitted = ImageOps.contain(img.convert("RGB"), (tw, th), method=Image.LANCZOS)
+        base.paste(fitted, ((tw - fitted.width) // 2, (th - fitted.height) // 2))
+        return base
+    try:
+        fill = ImageColor.getrgb(color)
+    except ValueError:
+        fill = (255, 255, 255)
+    return ImageOps.pad(img.convert("RGB"), (tw, th), method=Image.LANCZOS,
+                        color=fill, centering=(0.5, 0.5))
+
+
+def _gaussian(radius: int):
+    from PIL import ImageFilter  # noqa: PLC0415
+    return ImageFilter.GaussianBlur(radius)

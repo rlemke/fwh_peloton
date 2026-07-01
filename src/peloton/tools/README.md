@@ -54,6 +54,20 @@ Crops with no detectable face → `_no_face/`.
 All tools: structured JSON on **stdout**, logs on **stderr**, `--use-mock` for an
 offline deterministic run (no models), `--log-level`.
 
+### Fixed output size (`--frame`)
+
+By default each output is a tight crop in the rider's own proportions. To get a
+**standard photo size**, `--aspect W:H` (e.g. `4:5`) or `--size WxH` (e.g.
+`1080x1350`, exact pixels) expands the crop **outward** — real surrounding pixels
+(possibly other riders), never distortion — to hit the target, padding
+(`--pad-color name|#hex|blur`) only if the photo edge is reached. `--frame`
+chooses `single` (tight), `framed` (fixed size), or `both` (writes `_single` +
+`_framed`). `--aspect`/`--size` default `--frame` to `framed`.
+
+```bash
+process_photo.py --image g.jpg --out-dir out/ --frame both --size 1080x1350
+```
+
 ```bash
 # offline (no models) — verifies the whole path:
 python process_photo.py --image group.jpg --out-dir out/ --use-mock

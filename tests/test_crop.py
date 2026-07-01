@@ -43,6 +43,30 @@ def test_crop_box_dims_match(monkeypatch):
     assert out.size == (50, 40)
 
 
+def test_aspect_box_widens_tall_box_centered():
+    # a 40x100 box (0.4 ar) → target 1:1 widens to 100x100, centered on the box
+    box, needs_pad = crop.aspect_box((30, 0, 70, 100), 1.0, 200, 100)
+    x1, y1, x2, y2 = box
+    assert (x2 - x1, y2 - y1) == (100, 100)
+    assert (x1 + x2) / 2 == 50 and (y1 + y2) / 2 == 50  # centred on box centre
+    assert needs_pad is False
+
+
+def test_aspect_box_shifts_in_bounds_and_flags_pad():
+    # box hugging the right edge → the widened box slides left to stay in-frame
+    box, _ = crop.aspect_box((90, 0, 100, 100), 1.0, 100, 100)
+    assert box == (0, 0, 100, 100)
+    # a tall box + very wide target → the widened box exceeds the image → needs_pad
+    _, needs_pad = crop.aspect_box((40, 10, 60, 90), 5.0, 100, 100)
+    assert needs_pad is True
+
+
+def test_parse_aspect_and_size():
+    assert crop.parse_aspect("4:5") == 0.8
+    assert crop.parse_aspect("1/2") == 0.5
+    assert crop.parse_size("1080x1350") == (1080, 1350)
+
+
 def test_cutout_backgrounds():
     import numpy as np
     from PIL import Image

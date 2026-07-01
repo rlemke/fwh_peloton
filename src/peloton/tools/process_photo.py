@@ -20,7 +20,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _peloton_tools import pipeline  # noqa: E402
+from _peloton_tools import crop, pipeline  # noqa: E402
 
 
 def main() -> int:
@@ -31,6 +31,12 @@ def main() -> int:
     ap.add_argument("--pad", type=float, default=0.15, help="crop padding fraction (0.15 = 15%%)")
     ap.add_argument("--require-bike", action="store_true", help="drop persons with no paired bicycle")
     ap.add_argument("--scale", type=int, default=4, help="upscale factor")
+    ap.add_argument("--aspect", help="framed output aspect W:H (e.g. 4:5) — expands the crop to fit")
+    ap.add_argument("--size", help="framed output exact pixels WxH (e.g. 1080x1350; implies aspect)")
+    ap.add_argument("--frame", choices=["single", "framed", "both"], default=None,
+                    help="which outputs: single (tight), framed (fixed size), or both. "
+                         "Default single, or framed when --aspect/--size is given.")
+    ap.add_argument("--pad-color", default="white", help="fill at the photo edge: name|#hex|blur")
     ap.add_argument("--segment", action="store_true", help="SAM cutout each rider (mask, not bbox)")
     ap.add_argument("--cutout-bg", default="white", help="segment background: white|black|blur|transparent")
     ap.add_argument("--sam-model", default="mobile_sam.pt", help="SAM weights")
@@ -45,10 +51,14 @@ def main() -> int:
 
     logging.basicConfig(level=a.log_level.upper(), stream=sys.stderr,
                         format="%(levelname)s %(name)s: %(message)s")
+    aspect = crop.parse_aspect(a.aspect) if a.aspect else None
+    out_size = crop.parse_size(a.size) if a.size else None
+    frame = a.frame or ("framed" if (aspect or out_size) else "single")
     try:
         summary = pipeline.process_photo(
             a.image, a.out_dir, conf=a.conf, pad_frac=a.pad,
             require_bike=a.require_bike, scale=a.scale,
+            aspect=aspect, out_size=out_size, frame=frame, pad_color=a.pad_color,
             segment=a.segment, cutout_bg=a.cutout_bg, sam_model=a.sam_model,
             restore_faces=not a.no_face_restore, fidelity=a.fidelity,
             use_mock=a.use_mock, detect_model=a.model,
