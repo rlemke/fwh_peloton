@@ -29,8 +29,11 @@ def test_mock_detects_three_riders(photo):
 
 def test_process_photo_writes_one_output_per_rider(photo, tmp_path):
     out = tmp_path / "out"
+    # Force the non-ML backends so the offline suite stays fast + deterministic
+    # regardless of whether the .[enhance] models are installed on the host.
     summary = pipeline.process_photo(
-        photo, out, use_mock=True, scale=2, restore_faces=True)
+        photo, out, use_mock=True, scale=2, restore_faces=True,
+        upscale_backend="lanczos", face_backend="none")
     assert summary["n_riders"] == 3
     assert len(summary["riders"]) == 3
     for r in summary["riders"]:
@@ -38,9 +41,8 @@ def test_process_photo_writes_one_output_per_rider(photo, tmp_path):
         assert op.is_file()
         # upscaled: output larger than the source crop (x2)
         assert r["output_size"][0] > (r["focus_box"][2] - r["focus_box"][0])
-        # face-restore degrades to passthrough (no gfpgan) — recorded honestly
-        assert r["face_backend"] in {"none", "gfpgan"}
-        assert r["upscale_backend"] in {"lanczos", "realesrgan-ncnn", "realesrgan"}
+        assert r["upscale_backend"] == "lanczos"
+        assert r["face_backend"] == "none"
     # 3 files on disk
     assert len(list(out.glob("group_rider*.jpg"))) == 3
 

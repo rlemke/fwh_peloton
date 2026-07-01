@@ -17,9 +17,12 @@ dependencies = [
 [project.optional-dependencies]
 # Rider detection (person + bicycle boxes). Ultralytics pulls torch.
 detect = ["ultralytics>=8.1"]
-# Upscaling + face restoration. These stacks are finicky; the pipeline falls
-# back to a PIL Lanczos upscale + passthrough when they are absent.
-enhance = ["realesrgan>=0.3", "gfpgan>=1.3"]
+# Upscaling + face restoration. spandrel runs Real-ESRGAN .pth weights with
+# plain torch (no basicsr); gfpgan restores faces (a functional_tensor shim in
+# enhance.py bridges modern torchvision). Weights auto-download to
+# ~/.cache/peloton/weights (RealESRGAN_x4plus.pth, GFPGANv1.4.pth). The pipeline
+# falls back to Lanczos upscale + passthrough when these are absent.
+enhance = ["spandrel>=0.3", "gfpgan>=1.3"]
 s3 = ["boto3>=1.28"]
 test = ["pytest>=7.4"]
 

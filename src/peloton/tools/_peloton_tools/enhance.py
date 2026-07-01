@@ -18,6 +18,7 @@ Face-restore backends:
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 import subprocess
 import tempfile
@@ -27,6 +28,29 @@ from typing import Any
 log = logging.getLogger("peloton.enhance")
 
 _NCNN_BIN = "realesrgan-ncnn-vulkan"
+_WEIGHTS_DIR = os.path.expanduser(
+    os.environ.get("FW_PELOTON_WEIGHTS_DIR", "~/.cache/peloton/weights"))
+_SPANDREL_CACHE: dict[str, Any] = {}
+
+
+def _torch_device() -> str:
+    """MPS (Apple GPU) → CUDA → CPU, overridable with FW_PELOTON_DEVICE."""
+    dev = os.environ.get("FW_PELOTON_DEVICE")
+    if dev:
+        return dev
+    try:
+        import torch  # noqa: PLC0415
+        if torch.backends.mps.is_available():
+            return "mps"
+        if torch.cuda.is_available():
+            return "cuda"
+    except Exception:  # noqa: BLE001
+        pass
+    return "cpu"
+
+
+def _weights_path(filename: str, env: str) -> str:
+    return os.environ.get(env) or os.path.join(_WEIGHTS_DIR, filename)
 
 
 def upscale(img: Any, scale: int = 4, backend: str = "auto") -> tuple[Any, str]:
@@ -75,15 +99,70 @@ def _upscale_ncnn(img: Any, scale: int) -> Any | None:
         return out
 
 
+def _load_spandrel(weights: str) -> Any:
+    if weights in _SPANDREL_CACHE:
+        return _SPANDREL_CACHE[weights]
+    from spandrel import ImageModelDescriptor, ModelLoader  # noqa: PLC0415
+    model = ModelLoader().load_from_file(weights)
+    if not isinstance(model, ImageModelDescriptor):
+        raise RuntimeError(f"{weights} is not a single-image super-resolution model")
+    model.to(_torch_device()).eval()
+    log.info("loaded Real-ESRGAN weights %s (x%d) on %s",
+             Path(weights).name, model.scale, _torch_device())
+    _SPANDREL_CACHE[weights] = model
+    return model
+
+
+def _run_tiled(model: Any, img: Any, tile: int = 384, overlap: int = 16) -> Any:
+    """Tiled x``model.scale`` inference with overlap-blend — bounds memory so
+    large rider crops don't OOM on MPS/CPU."""
+    import numpy as np  # noqa: PLC0415
+    import torch  # noqa: PLC0415
+    from PIL import Image  # noqa: PLC0415
+
+    device = _torch_device()
+    s = int(model.scale)
+    W, H = img.width, img.height
+    arr = np.asarray(img.convert("RGB"), dtype=np.float32) / 255.0
+    out = np.zeros((H * s, W * s, 3), dtype=np.float32)
+    acc = np.zeros((H * s, W * s, 1), dtype=np.float32)
+    step = max(1, tile - overlap)
+    with torch.no_grad():
+        for y in range(0, H, step):
+            for x in range(0, W, step):
+                y2, x2 = min(y + tile, H), min(x + tile, W)
+                patch = arr[y:y2, x:x2, :].transpose(2, 0, 1)
+                t = torch.from_numpy(patch)[None].to(device)
+                r = model(t).clamp(0, 1)[0].detach().cpu().float().numpy().transpose(1, 2, 0)
+                oy, ox = y * s, x * s
+                out[oy:oy + r.shape[0], ox:ox + r.shape[1], :] += r
+                acc[oy:oy + r.shape[0], ox:ox + r.shape[1], :] += 1.0
+                if y2 >= H:
+                    break
+            if x2 >= W and y2 >= H:
+                pass
+    out = (out / np.maximum(acc, 1e-6) * 255.0).clip(0, 255).astype(np.uint8)
+    return Image.fromarray(out)
+
+
 def _upscale_realesrgan_py(img: Any, scale: int) -> Any | None:
+    """Real-ESRGAN via spandrel (plain torch, no basicsr). Returns None if the
+    library/weights aren't present so ``auto`` falls back to Lanczos."""
     try:
-        import numpy as np  # noqa: PLC0415
-        from realesrgan import RealESRGANer  # noqa: PLC0415
+        import spandrel  # noqa: F401,PLC0415
     except ImportError:
         return None
-    # The Python stack needs a configured model + weights; if the caller hasn't
-    # set one up this raises and "auto" falls back. Kept minimal on purpose.
-    raise RuntimeError("realesrgan python backend needs an explicit model setup")
+    weights = _weights_path("RealESRGAN_x4plus.pth", "FW_PELOTON_REALESRGAN_WEIGHTS")
+    if not os.path.isfile(weights):
+        log.warning("Real-ESRGAN weights missing (%s) — falling back", weights)
+        return None
+    model = _load_spandrel(weights)
+    out = _run_tiled(model, img)
+    native = int(model.scale)
+    if scale != native:
+        from PIL import Image  # noqa: PLC0415
+        out = out.resize((img.width * scale, img.height * scale), Image.LANCZOS)
+    return out
 
 
 def restore_faces(img: Any, fidelity: float = 0.7, backend: str = "auto") -> tuple[Any, str]:
@@ -108,11 +187,47 @@ def restore_faces(img: Any, fidelity: float = 0.7, backend: str = "auto") -> tup
     return img, "none"
 
 
+_GFPGAN_CACHE: dict[str, Any] = {}
+
+
+def _get_gfpgan(weights: str) -> Any:
+    if weights in _GFPGAN_CACHE:
+        return _GFPGAN_CACHE[weights]
+    from gfpgan import GFPGANer  # noqa: PLC0415
+    r = GFPGANer(model_path=weights, upscale=1, arch="clean",
+                 channel_multiplier=2, bg_upsampler=None)
+    log.info("loaded GFPGAN %s", Path(weights).name)
+    _GFPGAN_CACHE[weights] = r
+    return r
+
+
 def _restore_gfpgan(img: Any, fidelity: float) -> Any | None:
+    """GFPGAN face restoration. Returns None (→ passthrough) if the library or
+    weights are absent, so ``auto`` degrades cleanly."""
+    import sys  # noqa: PLC0415
     try:
+        # basicsr (a GFPGAN dep) imports torchvision.transforms.functional_tensor,
+        # removed in torchvision>=0.17 — alias it to the current module so the
+        # import succeeds on modern torch.
+        import torchvision.transforms.functional as _tvf  # noqa: PLC0415
+        sys.modules.setdefault("torchvision.transforms.functional_tensor", _tvf)
         import gfpgan  # noqa: F401,PLC0415
     except ImportError:
         return None
-    # Real GFPGAN wiring (weights + GFPGANer) lands with the enhance extra; kept
-    # a stub so "auto" degrades cleanly until it's configured.
-    raise RuntimeError("gfpgan backend needs weights/model setup")
+    weights = _weights_path("GFPGANv1.4.pth", "FW_PELOTON_GFPGAN_WEIGHTS")
+    if not os.path.isfile(weights):
+        log.warning("GFPGAN weights missing (%s) — passthrough", weights)
+        return None
+
+    import numpy as np  # noqa: PLC0415
+    from PIL import Image  # noqa: PLC0415
+
+    restorer = _get_gfpgan(weights)
+    bgr = np.asarray(img.convert("RGB"))[:, :, ::-1].copy()
+    # GFPGAN's `weight` blends restored↔original — map our identity `fidelity`.
+    _cropped, _restored_faces, restored = restorer.enhance(
+        bgr, has_aligned=False, only_center_face=False, paste_back=True,
+        weight=float(fidelity))
+    if restored is None:
+        return None
+    return Image.fromarray(restored[:, :, ::-1])
