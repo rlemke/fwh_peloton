@@ -45,6 +45,8 @@ def process_photo(
     dpi: int = 300,
     match_input: bool = False,
     print_sizes: list[tuple[str, float, float]] | None = None,
+    auto_brighten: bool = False,
+    brighten_target: float = 120.0,
     use_mock: bool = False,
     detect_model: str = "yolo11x.pt",
     upscale_backend: str = "auto",
@@ -83,6 +85,12 @@ def process_photo(
     ``inches*dpi`` pixels and that aspect (e.g. ``[("4x6",4,6),("8x10",8,10)]``).
     Overrides ``aspect``/``out_size``. Different sizes have different aspects, so
     each is a genuinely different crop, not a rescale of the others.
+
+    auto_brighten — lift an under-exposed rider via gamma before enhancement.
+    Metered on the *rider region* (not the frame — a backlit rider is dark even
+    when the frame averages fine) toward ``brighten_target`` mean luminance
+    (0..255). No-op when the rider is already bright enough; each output records
+    the ``gamma`` applied.
     """
     want_single = frame in ("single", "both")
     want_framed = frame in ("framed", "both")
@@ -168,19 +176,23 @@ def process_photo(
                          Image.LANCZOS)
 
     def _emit(up: Any, label: str, is_rgba: bool, out_dpi: int | None,
-              ub: str, fb: str, r: Any, outs: list[dict[str, Any]]) -> None:
+              ub: str, fb: str, gamma: float, r: Any, outs: list[dict[str, Any]]) -> None:
         suffix = f"_{label}" if n_kinds > 1 else ""
         out_path = out / f"{src.stem}_rider{r.index:02d}{suffix}.{'png' if is_rgba else 'jpg'}"
         _images.save_image(up, out_path, dpi=out_dpi)
         outs.append({"kind": "single" if label == "single" else "framed", "label": label,
                      "output": str(out_path), "output_size": list(_images.size(up)),
-                     "upscale_backend": ub, "face_backend": fb})
-        log.info("rider %02d [%s] → %s", r.index, label, out_path.name)
+                     "upscale_backend": ub, "face_backend": fb, "brighten_gamma": gamma})
+        log.info("rider %02d [%s] → %s%s", r.index, label, out_path.name,
+                 f" (brighten {gamma:.2f})" if gamma > 1.0 else "")
 
     results: list[dict[str, Any]] = []
     for r in riders:
         base = r.focus_box(pad_frac, w, h)
         outs: list[dict[str, Any]] = []
+        # Meter exposure on the rider region (not the frame) so a backlit rider
+        # is corrected even when the frame averages fine; one gamma per rider.
+        meter = img.crop(tuple(int(v) for v in r.focus_box(0.0, w, h))) if auto_brighten else None
 
         if want_single:
             if segment:
@@ -189,18 +201,23 @@ def process_photo(
                 crop_img = _crop.cutout(img, mask, base, bg=cutout_bg)
             else:
                 crop_img = img.crop(tuple(int(v) for v in base))
+            crop_img, gamma = (_enhance.auto_brighten(crop_img, meter=meter, target=brighten_target)
+                               if auto_brighten else (crop_img, 1.0))
             up, ub, fb, is_rgba = _enhance_crop(crop_img)
             if match_input:
                 upscaled = max(up.size) < long_edge
                 up = _to_long_edge(up)                 # long edge == input (up or down)
                 if upscaled:
                     up = _sharpen(up)                  # interpolated up → recover crispness
-            _emit(up, "single", is_rgba, None, ub, fb, r, outs)
+            _emit(up, "single", is_rgba, None, ub, fb, gamma, r, outs)
 
         for sp in framed_specs:  # each print size: expand OUTWARD to its aspect, then size/pad
             ar, osz = sp["target_ar"], sp["out_size"]
             abox, needs_pad = _crop.aspect_box(base, ar, w, h)
-            up, ub, fb, is_rgba = _enhance_crop(img.crop(tuple(int(v) for v in abox)))
+            region_crop = img.crop(tuple(int(v) for v in abox))
+            region_crop, gamma = (_enhance.auto_brighten(region_crop, meter=meter, target=brighten_target)
+                                  if auto_brighten else (region_crop, 1.0))
+            up, ub, fb, is_rgba = _enhance_crop(region_crop)
             fitted = False
             if osz:
                 up = _images.fit_to_size(up, osz, color=pad_color)
@@ -212,7 +229,7 @@ def process_photo(
                 is_rgba, fitted = False, True
             if fitted:
                 up = _sharpen(up)
-            _emit(up, sp["label"], is_rgba, sp["dpi"], ub, fb, r, outs)
+            _emit(up, sp["label"], is_rgba, sp["dpi"], ub, fb, gamma, r, outs)
 
         first = outs[0]
         results.append({

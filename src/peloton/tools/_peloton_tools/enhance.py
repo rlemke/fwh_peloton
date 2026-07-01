@@ -18,6 +18,7 @@ Face-restore backends:
 from __future__ import annotations
 
 import logging
+import math
 import os
 import shutil
 import subprocess
@@ -31,6 +32,38 @@ _NCNN_BIN = "realesrgan-ncnn-vulkan"
 _WEIGHTS_DIR = os.path.expanduser(
     os.environ.get("FW_PELOTON_WEIGHTS_DIR", "~/.cache/peloton/weights"))
 _SPANDREL_CACHE: dict[str, Any] = {}
+
+
+def auto_brighten(img: Any, meter: Any = None, target: float = 120.0,
+                  max_gamma: float = 2.4) -> tuple[Any, float]:
+    """Lighten an under-exposed image via gamma, metered on ``meter`` (a region
+    crop) or the whole image. Gamma lifts shadows/midtones while preserving
+    highlights (255→255, so a bright background never blows out further); the
+    correction is capped at ``max_gamma``. Returns ``(image, gamma_applied)``;
+    gamma 1.0 means it was already bright enough (no-op).
+
+    ``target`` is the mean luminance (0..255) to lift the metered region toward.
+    Meter on the rider region, not the frame — a backlit rider is dark even when
+    the frame averages fine.
+    """
+    import numpy as np  # noqa: PLC0415
+
+    region = meter if meter is not None else img
+    m = float(np.asarray(region.convert("L"), dtype=np.float32).mean())
+    if m <= 1.0 or m >= target:            # already bright enough (or pure black)
+        return img, 1.0
+    # solve (m/255)^(1/gamma) == target/255  → gamma > 1 brightens
+    gamma = min(max_gamma, math.log(m / 255.0) / math.log(target / 255.0))
+    if gamma <= 1.001:
+        return img, 1.0
+    inv = 1.0 / gamma
+    lut = [round(255.0 * ((i / 255.0) ** inv)) for i in range(256)]
+    bands = img.split()
+    rgb = [b.point(lut) for b in bands[:3]] + list(bands[3:])  # keep alpha linear
+    from PIL import Image  # noqa: PLC0415
+    out = Image.merge(img.mode, rgb) if len(bands) > 1 else bands[0].point(lut)
+    log.info("auto-brighten: region mean %.0f → gamma %.2f (target %.0f)", m, gamma, target)
+    return out, round(gamma, 3)
 
 
 def _torch_device() -> str:

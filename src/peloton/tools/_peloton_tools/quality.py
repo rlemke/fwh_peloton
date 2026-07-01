@@ -46,6 +46,14 @@ def exposure(img: Any) -> float:
     return max(0.0, 1.0 - 2.0 * abs(float(a.mean()) - 0.5) - clip)
 
 
+def mean_luma(img: Any) -> float:
+    """Mean perceptual luminance, 0..255 (a signed brightness reading, unlike
+    ``exposure`` which is symmetric). Low = dark, high = bright."""
+    import numpy as np  # noqa: PLC0415
+
+    return float(np.asarray(img.convert("L"), dtype=np.float32).mean())
+
+
 def score(img: Any, *, face_box: Any = None) -> dict[str, float]:
     """Rank-oriented quality score. If ``face_box`` is given, sharpness is
     measured on the face region — that's what matters for a rider portrait."""

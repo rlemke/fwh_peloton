@@ -25,6 +25,11 @@ def test_focus_score_blurred_lower_and_resolution_normalized():
     assert abs(quality.focus_score(sharp) - quality.focus_score(big)) < quality.focus_score(sharp) * 0.5
 
 
+def test_mean_luma_signed_and_ordered():
+    assert quality.mean_luma(Image.new("RGB", (16, 16), (30, 30, 30))) < \
+        quality.mean_luma(Image.new("RGB", (16, 16), (200, 200, 200)))
+
+
 def test_exposure_midgrey_high_black_low():
     assert quality.exposure(Image.new("RGB", (32, 32), (128, 128, 128))) > 0.9
     assert quality.exposure(Image.new("RGB", (32, 32), (0, 0, 0))) < 0.3

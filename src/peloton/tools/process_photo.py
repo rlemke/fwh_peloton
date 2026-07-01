@@ -45,6 +45,10 @@ def main() -> int:
                     help="print DPI embedded in framed outputs (1200x1800 @ 300 = 4x6\")")
     ap.add_argument("--match-input", action="store_true",
                     help="scale outputs so long edge = input long edge (~input MP); dpi scales too")
+    ap.add_argument("--auto-brighten", action="store_true",
+                    help="lighten under-exposed/backlit riders (metered on the rider, gamma, no-op if bright)")
+    ap.add_argument("--brighten-target", type=float, default=120.0,
+                    help="target rider mean luminance 0..255 for --auto-brighten (default 120)")
     ap.add_argument("--segment", action="store_true", help="SAM cutout each rider (mask, not bbox)")
     ap.add_argument("--cutout-bg", default="white", help="segment background: white|black|blur|transparent")
     ap.add_argument("--sam-model", default="mobile_sam.pt", help="SAM weights")
@@ -70,6 +74,7 @@ def main() -> int:
             require_bike=a.require_bike, scale=a.scale,
             aspect=aspect, out_size=out_size, frame=frame, pad_color=a.pad_color,
             print_sizes=print_sizes,
+            auto_brighten=a.auto_brighten, brighten_target=a.brighten_target,
             sharpen_framed=a.sharpen_framed, dpi=a.dpi, match_input=a.match_input,
             segment=a.segment, cutout_bg=a.cutout_bg, sam_model=a.sam_model,
             restore_faces=not a.no_face_restore, fidelity=a.fidelity,
