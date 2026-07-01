@@ -64,6 +64,8 @@ def main() -> int:
     ap.add_argument("--model", default="yolo11x.pt")
     ap.add_argument("--upscale-backend", default="auto")
     ap.add_argument("--face-backend", default="auto")
+    ap.add_argument("--resume", action="store_true",
+                    help="skip source photos already recorded in <out>/manifest.json (resumable run)")
     ap.add_argument("--use-mock", action="store_true")
     ap.add_argument("--log-level", default="INFO")
     a = ap.parse_args()
@@ -85,12 +87,34 @@ def main() -> int:
     if not photos:
         log.error("no images found in %s", in_dir)
         return 1
-    log.info("batch: %d photo(s) from %s → %s", len(photos), in_dir, out_dir)
-
+    # Resume: carry forward prior results and skip sources already processed.
     manifest: list[dict] = []
+    done: set[str] = set()
     n_ok = n_fail = n_riders = n_blurry = 0
+    mf = out_dir / "manifest.json"
+    if a.resume and mf.exists():
+        try:
+            prior = json.loads(mf.read_text())
+            manifest = prior.get("photos", [])
+            for e in manifest:
+                done.add(e["source"])
+                if "error" in e:
+                    n_fail += 1
+                elif "unfocused" in e:
+                    n_blurry += 1
+                else:
+                    n_ok += 1
+                    n_riders += e.get("n_riders", 0)
+            log.info("resume: %d source(s) already in manifest — skipping them", len(done))
+        except Exception as exc:  # noqa: BLE001
+            log.warning("resume: could not read manifest (%s) — starting fresh", exc)
+    log.info("batch: %d photo(s) from %s → %s (%d remaining)",
+             len(photos), in_dir, out_dir, len([p for p in photos if str(p) not in done]))
+
     batch_t0 = time.time()
     for i, f in enumerate(photos, 1):
+        if str(f) in done:
+            continue
         t0 = time.time()
         if a.min_sharpness is not None:
             from _peloton_tools import images as _im, quality as _q  # noqa: PLC0415
