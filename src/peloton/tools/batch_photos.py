@@ -37,6 +37,8 @@ def main() -> int:
     ap.add_argument("--conf", type=float, default=0.25)
     ap.add_argument("--pad", type=float, default=0.15)
     ap.add_argument("--require-bike", action="store_true")
+    ap.add_argument("--min-sharpness", type=float, default=None,
+                    help="skip photos below this focus score, moving them to <out>/_unfocused/")
     ap.add_argument("--scale", type=int, default=4)
     ap.add_argument("--aspect", help="framed output aspect W:H (e.g. 4:5)")
     ap.add_argument("--size", help="framed output exact pixels WxH (e.g. 1080x1350)")
@@ -72,10 +74,26 @@ def main() -> int:
     log.info("batch: %d photo(s) from %s → %s", len(photos), in_dir, out_dir)
 
     manifest: list[dict] = []
-    n_ok = n_fail = n_riders = 0
+    n_ok = n_fail = n_riders = n_blurry = 0
     batch_t0 = time.time()
     for i, f in enumerate(photos, 1):
         t0 = time.time()
+        if a.min_sharpness is not None:
+            from _peloton_tools import images as _im, quality as _q  # noqa: PLC0415
+            try:
+                fs = _q.focus_score(_im.load_image(f))
+            except Exception:  # noqa: BLE001
+                fs = None
+            if fs is not None and fs < a.min_sharpness:
+                import shutil  # noqa: PLC0415
+                unf = out_dir / "_unfocused"
+                unf.mkdir(exist_ok=True)
+                shutil.move(str(f), str(unf / f.name))
+                n_blurry += 1
+                manifest.append({"source": str(f), "unfocused": round(fs, 1)})
+                log.info("[%d/%d] %s: focus=%.1f < %.1f → _unfocused/", i, len(photos),
+                         f.name, fs, a.min_sharpness)
+                continue
         try:
             s = pipeline.process_photo(
                 f, out_dir, conf=a.conf, pad_frac=a.pad,
@@ -104,7 +122,8 @@ def main() -> int:
              "rider_portraits": n_riders, "photos": manifest}, indent=2))
 
     summary = {"total": len(photos), "ok": n_ok, "failed": n_fail,
-               "rider_portraits": n_riders, "out_dir": str(out_dir),
+               "unfocused": n_blurry, "rider_portraits": n_riders,
+               "out_dir": str(out_dir),
                "elapsed_seconds": round(time.time() - batch_t0, 1)}
     log.info("DONE: %d photos (%d ok, %d failed) → %d rider portrait(s) in %.0fs",
              len(photos), n_ok, n_fail, n_riders, summary["elapsed_seconds"])

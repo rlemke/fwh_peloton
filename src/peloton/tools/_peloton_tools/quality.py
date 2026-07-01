@@ -28,6 +28,15 @@ def sharpness(img: Any) -> float:
         return float(lap[1:-1, 1:-1].var())
 
 
+def focus_score(img: Any, *, height: int = 512) -> float:
+    """Resolution-normalized sharpness: resize to a fixed ``height`` first, then
+    Laplacian variance — so photos of different megapixels are comparable and a
+    single ``--min-sharpness`` threshold means the same thing across a folder."""
+    if img.height > height:
+        img = img.resize((max(1, img.width * height // img.height), height))
+    return sharpness(img)
+
+
 def exposure(img: Any) -> float:
     """0..1 (1 = well-exposed). Penalizes distance from mid-grey and clipping."""
     import numpy as np  # noqa: PLC0415

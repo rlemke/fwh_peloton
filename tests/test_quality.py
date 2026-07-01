@@ -15,6 +15,16 @@ def test_sharpness_sharp_greater_than_blurred():
     assert quality.sharpness(sharp) > quality.sharpness(blurred)
 
 
+def test_focus_score_blurred_lower_and_resolution_normalized():
+    rng = np.random.default_rng(1)
+    sharp = Image.fromarray(rng.integers(0, 256, (900, 700, 3)).astype("uint8"))
+    blurred = sharp.filter(ImageFilter.GaussianBlur(5))
+    assert quality.focus_score(sharp) > quality.focus_score(blurred)
+    # normalization: same content at 2x size scores comparably (within tolerance)
+    big = sharp.resize((1400, 1800))
+    assert abs(quality.focus_score(sharp) - quality.focus_score(big)) < quality.focus_score(sharp) * 0.5
+
+
 def test_exposure_midgrey_high_black_low():
     assert quality.exposure(Image.new("RGB", (32, 32), (128, 128, 128))) > 0.9
     assert quality.exposure(Image.new("RGB", (32, 32), (0, 0, 0))) < 0.3

@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 TOOLS = Path(__file__).resolve().parents[1] / "src" / "peloton" / "tools"
-CLIS = ["detect_riders.py", "crop_riders.py", "enhance_image.py", "process_photo.py", "batch_photos.py", "group_riders.py"]
+CLIS = ["detect_riders.py", "crop_riders.py", "enhance_image.py", "process_photo.py", "batch_photos.py", "group_riders.py", "cull_blurry.py"]
 
 
 def _run(*args):
