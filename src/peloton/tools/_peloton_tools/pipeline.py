@@ -44,6 +44,7 @@ def process_photo(
     sharpen_framed: float = 130.0,
     dpi: int = 300,
     match_input: bool = False,
+    print_sizes: list[tuple[str, float, float]] | None = None,
     use_mock: bool = False,
     detect_model: str = "yolo11x.pt",
     upscale_backend: str = "auto",
@@ -71,17 +72,20 @@ def process_photo(
     crop is a variable-size digital view, so it is left untagged.
 
     match_input — scale every output so its long edge equals the input photo's
-    long edge (a 24 MP source → a ~24 MP output). The framed target and its dpi
-    are scaled by the same factor, so the print size is unchanged (still 4x6")
+    long edge (a 24 MP source → a ~24 MP output). Each framed target and its dpi
+    scale by the same factor, so the print size is unchanged (still 4x6"/8x10")
     just at higher resolution; the single crop is up-scaled to the same long edge.
     NOTE: for a small/distant rider this interpolates beyond the detail actually
     captured — big pixels, not new detail.
+
+    print_sizes — a list of ``(label, width_in, height_in)`` print sizes, each
+    emitting its own framed output (``<stem>_riderNN_<label>.jpg``) at
+    ``inches*dpi`` pixels and that aspect (e.g. ``[("4x6",4,6),("8x10",8,10)]``).
+    Overrides ``aspect``/``out_size``. Different sizes have different aspects, so
+    each is a genuinely different crop, not a rescale of the others.
     """
-    target_ar = aspect or (out_size[0] / out_size[1] if out_size else None)
-    kinds = (["single", "framed"] if frame == "both"
-             else ["framed"] if frame == "framed" else ["single"])
-    if "framed" in kinds and not target_ar:
-        raise ValueError("framed output needs aspect= or out_size=")
+    want_single = frame in ("single", "both")
+    want_framed = frame in ("framed", "both")
 
     src = Path(image_path)
     out = Path(out_dir)
@@ -90,17 +94,36 @@ def process_photo(
     img = _images.load_image(src)
     w, h = _images.size(img)
     log.info("loaded %s (%dx%d)", src.name, w, h)
-
     long_edge = max(w, h)
-    if match_input and "framed" in kinds:
-        if out_size:  # scale pixels + dpi by the same k → same print size, more px
-            k = long_edge / max(out_size)
-            out_size = (max(1, round(out_size[0] * k)), max(1, round(out_size[1] * k)))
-            dpi = max(1, round(dpi * k))
-        else:  # aspect only → size the long dimension to the input long edge
-            out_size = ((round(long_edge * target_ar), long_edge) if target_ar < 1
-                        else (long_edge, round(long_edge / target_ar)))
-        log.info("match_input: framed → %dx%d @ %d dpi", out_size[0], out_size[1], dpi)
+
+    # Build one framed target per requested size: {label, target_ar, out_size, dpi}.
+    framed_specs: list[dict[str, Any]] = []
+    if want_framed:
+        if print_sizes:
+            for label, iw, ih in print_sizes:
+                framed_specs.append({"label": label, "target_ar": iw / ih,
+                                     "out_size": (max(1, round(iw * dpi)),
+                                                  max(1, round(ih * dpi))), "dpi": dpi})
+        else:
+            ar = aspect or (out_size[0] / out_size[1] if out_size else None)
+            if not ar:
+                raise ValueError("framed output needs aspect=, out_size=, or print_sizes=")
+            framed_specs.append({"label": "framed", "target_ar": ar,
+                                 "out_size": out_size, "dpi": dpi})
+        if match_input:  # scale each target's pixels + dpi so its long edge == input
+            for sp in framed_specs:
+                osz = sp["out_size"]
+                if osz:
+                    k = long_edge / max(osz)
+                    sp["out_size"] = (max(1, round(osz[0] * k)), max(1, round(osz[1] * k)))
+                    sp["dpi"] = max(1, round(sp["dpi"] * k))
+                else:  # aspect-only → size the long dimension to the input long edge
+                    ar = sp["target_ar"]
+                    sp["out_size"] = ((round(long_edge * ar), long_edge) if ar < 1
+                                      else (long_edge, round(long_edge / ar)))
+                log.info("match_input: framed[%s] → %dx%d @ %d dpi", sp["label"],
+                         sp["out_size"][0], sp["out_size"][1], sp["dpi"])
+    n_kinds = (1 if want_single else 0) + len(framed_specs)
 
     riders = _detect.detect_riders(
         img, conf=conf, require_bike=require_bike,
@@ -144,47 +167,52 @@ def process_photo(
         return im.resize((max(1, round(im.width * s)), max(1, round(im.height * s))),
                          Image.LANCZOS)
 
+    def _emit(up: Any, label: str, is_rgba: bool, out_dpi: int | None,
+              ub: str, fb: str, r: Any, outs: list[dict[str, Any]]) -> None:
+        suffix = f"_{label}" if n_kinds > 1 else ""
+        out_path = out / f"{src.stem}_rider{r.index:02d}{suffix}.{'png' if is_rgba else 'jpg'}"
+        _images.save_image(up, out_path, dpi=out_dpi)
+        outs.append({"kind": "single" if label == "single" else "framed", "label": label,
+                     "output": str(out_path), "output_size": list(_images.size(up)),
+                     "upscale_backend": ub, "face_backend": fb})
+        log.info("rider %02d [%s] → %s", r.index, label, out_path.name)
+
     results: list[dict[str, Any]] = []
     for r in riders:
         base = r.focus_box(pad_frac, w, h)
         outs: list[dict[str, Any]] = []
-        for kind in kinds:
-            if kind == "single":
-                if segment:
-                    prompt = _crop.union(r.person_box, r.bike_box)
-                    mask = _segment.segment_box(img, prompt, model=sam_model, use_mock=use_mock)
-                    crop_img = _crop.cutout(img, mask, base, bg=cutout_bg)
-                else:
-                    crop_img = img.crop(tuple(int(v) for v in base))
-                up, ub, fb, is_rgba = _enhance_crop(crop_img)
-                if match_input:
-                    upscaled = max(up.size) < long_edge
-                    up = _to_long_edge(up)                 # long edge == input (up or down)
-                    if upscaled:
-                        up = _sharpen(up)                  # interpolated up → recover crispness
-            else:  # framed — expand OUTWARD to the target aspect, then size/pad
-                abox, needs_pad = _crop.aspect_box(base, target_ar, w, h)
-                up, ub, fb, is_rgba = _enhance_crop(img.crop(tuple(int(v) for v in abox)))
-                fitted = False
-                if out_size:
-                    up = _images.fit_to_size(up, out_size, color=pad_color)
-                    is_rgba, fitted = False, True
-                elif needs_pad or abs(up.width / up.height - target_ar) > 0.01:
-                    W2, H2 = up.size
-                    tgt = ((round(H2 * target_ar), H2) if W2 / H2 < target_ar
-                           else (W2, round(W2 / target_ar)))
-                    up = _images.fit_to_size(up, tgt, color=pad_color)
-                    is_rgba, fitted = False, True
-                if fitted:
-                    up = _sharpen(up)
 
-            suffix = f"_{kind}" if len(kinds) > 1 else ""
-            out_path = out / f"{src.stem}_rider{r.index:02d}{suffix}.{'png' if is_rgba else 'jpg'}"
-            _images.save_image(up, out_path, dpi=dpi if kind == "framed" else None)
-            outs.append({"kind": kind, "output": str(out_path),
-                         "output_size": list(_images.size(up)),
-                         "upscale_backend": ub, "face_backend": fb})
-            log.info("rider %02d [%s] → %s", r.index, kind, out_path.name)
+        if want_single:
+            if segment:
+                prompt = _crop.union(r.person_box, r.bike_box)
+                mask = _segment.segment_box(img, prompt, model=sam_model, use_mock=use_mock)
+                crop_img = _crop.cutout(img, mask, base, bg=cutout_bg)
+            else:
+                crop_img = img.crop(tuple(int(v) for v in base))
+            up, ub, fb, is_rgba = _enhance_crop(crop_img)
+            if match_input:
+                upscaled = max(up.size) < long_edge
+                up = _to_long_edge(up)                 # long edge == input (up or down)
+                if upscaled:
+                    up = _sharpen(up)                  # interpolated up → recover crispness
+            _emit(up, "single", is_rgba, None, ub, fb, r, outs)
+
+        for sp in framed_specs:  # each print size: expand OUTWARD to its aspect, then size/pad
+            ar, osz = sp["target_ar"], sp["out_size"]
+            abox, needs_pad = _crop.aspect_box(base, ar, w, h)
+            up, ub, fb, is_rgba = _enhance_crop(img.crop(tuple(int(v) for v in abox)))
+            fitted = False
+            if osz:
+                up = _images.fit_to_size(up, osz, color=pad_color)
+                is_rgba, fitted = False, True
+            elif needs_pad or abs(up.width / up.height - ar) > 0.01:
+                W2, H2 = up.size
+                tgt = ((round(H2 * ar), H2) if W2 / H2 < ar else (W2, round(W2 / ar)))
+                up = _images.fit_to_size(up, tgt, color=pad_color)
+                is_rgba, fitted = False, True
+            if fitted:
+                up = _sharpen(up)
+            _emit(up, sp["label"], is_rgba, sp["dpi"], ub, fb, r, outs)
 
         first = outs[0]
         results.append({

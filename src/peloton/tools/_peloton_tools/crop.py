@@ -28,6 +28,18 @@ def parse_size(s: str) -> tuple[int, int]:
     return int(w), int(h)
 
 
+def parse_print_sizes(s: str) -> list[tuple[str, float, float]]:
+    """``'4x6,8x10'`` → ``[('4x6', 4.0, 6.0), ('8x10', 8.0, 10.0)]`` (label, w_in, h_in)."""
+    out: list[tuple[str, float, float]] = []
+    for tok in s.split(","):
+        tok = tok.strip()
+        if not tok:
+            continue
+        wi, hi = tok.lower().replace(" ", "").split("x")
+        out.append((tok, float(wi), float(hi)))
+    return out
+
+
 def clamp_box(box: Box, width: int, height: int) -> Box:
     """Clamp a box to the image bounds and to integer pixels."""
     x1, y1, x2, y2 = box

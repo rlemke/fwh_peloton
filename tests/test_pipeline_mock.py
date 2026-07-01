@@ -149,6 +149,26 @@ def test_match_input_sets_long_edge_and_scales_dpi(tmp_path):
         assert max(sg["output_size"]) == 1200
 
 
+def test_print_sizes_emits_one_framed_per_size(photo, tmp_path):
+    from PIL import Image
+    out = tmp_path / "prints"
+    summary = pipeline.process_photo(
+        photo, out, use_mock=True, scale=2, restore_faces=False, frame="both",
+        print_sizes=[("4x6", 4, 6), ("8x10", 8, 10)], dpi=300, upscale_backend="lanczos")
+    for r in summary["riders"]:
+        by_label = {o["label"]: o for o in r["outputs"]}
+        assert set(by_label) == {"single", "4x6", "8x10"}
+        # each print size → its own pixels (inches*dpi) and aspect
+        assert by_label["4x6"]["output_size"] == [1200, 1800]     # 4:6 @ 300
+        assert by_label["8x10"]["output_size"] == [2400, 3000]    # 4:5 @ 300
+        for lbl in ("4x6", "8x10"):
+            assert Image.open(by_label[lbl]["output"]).info.get("dpi") == (300, 300)
+    # distinct files on disk per rider per size
+    assert len(list(out.glob("*_4x6.jpg"))) == 3
+    assert len(list(out.glob("*_8x10.jpg"))) == 3
+    assert len(list(out.glob("*_single.jpg"))) == 3
+
+
 def test_framed_needs_aspect(photo, tmp_path):
     # a framed run with no aspect/out_size is a usage error
     with pytest.raises(ValueError):

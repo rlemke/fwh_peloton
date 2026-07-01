@@ -33,6 +33,8 @@ def main() -> int:
     ap.add_argument("--scale", type=int, default=4, help="upscale factor")
     ap.add_argument("--aspect", help="framed output aspect W:H (e.g. 4:5) — expands the crop to fit")
     ap.add_argument("--size", help="framed output exact pixels WxH (e.g. 1080x1350; implies aspect)")
+    ap.add_argument("--print-sizes",
+                    help="one framed output per print size, e.g. '4x6,8x10' (inches; overrides --size/--aspect)")
     ap.add_argument("--frame", choices=["single", "framed", "both"], default=None,
                     help="which outputs: single (tight), framed (fixed size), or both. "
                          "Default single, or framed when --aspect/--size is given.")
@@ -59,12 +61,15 @@ def main() -> int:
                         format="%(levelname)s %(name)s: %(message)s")
     aspect = crop.parse_aspect(a.aspect) if a.aspect else None
     out_size = crop.parse_size(a.size) if a.size else None
-    frame = a.frame or ("framed" if (aspect or out_size) else "single")
+    print_sizes = crop.parse_print_sizes(a.print_sizes) if a.print_sizes else None
+    frame = a.frame or ("both" if print_sizes else
+                        "framed" if (aspect or out_size) else "single")
     try:
         summary = pipeline.process_photo(
             a.image, a.out_dir, conf=a.conf, pad_frac=a.pad,
             require_bike=a.require_bike, scale=a.scale,
             aspect=aspect, out_size=out_size, frame=frame, pad_color=a.pad_color,
+            print_sizes=print_sizes,
             sharpen_framed=a.sharpen_framed, dpi=a.dpi, match_input=a.match_input,
             segment=a.segment, cutout_bg=a.cutout_bg, sam_model=a.sam_model,
             restore_faces=not a.no_face_restore, fidelity=a.fidelity,
