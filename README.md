@@ -6,9 +6,25 @@ picture of them, then helps you size, organize, and cull the results.
 
 ```
 group photo → detect riders (YOLO person+bicycle) → crop each (person ∪ bike)
-            → [SAM cutout] → upscale (Real-ESRGAN) → face-restore (GFPGAN/CodeFormer)
-            → [size to a standard 4×6/1:1/…] → out/<stem>_riderNN.jpg
+            → dehaze + auto-brighten → keep NATIVE detail (upscale only when a crop
+              is smaller than the target — a sharp high-res crop is left as-is;
+              Real-ESRGAN would over-smooth it) → [SAM cutout] → [face-restore]
+            → a tight _single (+ optional wider _context that also captures the
+              surrounding riders) → out/<stem>_riderNN[.jpg | .tif]
 ```
+
+Two enhancement fixes matter for high-resolution sources (e.g. 45 MP DSLR RAW):
+- **Detail-preserving.** Each rider crop off a big frame is already high-res, so the
+  Real-ESRGAN 4× upscaler (a *low-res* super-resolver that denoises) is **skipped**
+  unless the crop is genuinely smaller than the target — running it then downscaling
+  visibly softens a sharp crop. `--upscale-mode auto` (default) / `never` / `always`.
+- **Dehaze.** These frames come off the camera flat (lifted blacks, muted colour); a
+  per-image black/white-point stretch + mild contrast/colour removes the veil. On by
+  default (`--no-dehaze` to disable).
+
+**Output:** `--out-format jpg` (default, 8-bit) or **`tiff`** (lossless **16-bit** —
+decodes RAW at 16-bit and does the tonal math in 16-bit so a heavy brighten/dehaze
+stretch stays banding-free; the archival master, large files).
 
 A Facetwork domain package following the tools/handlers pattern. This ships the
 reusable **library + CLI tools** (`src/peloton/tools/`); the FFL handlers/workflow
@@ -43,7 +59,12 @@ pip install -e '.[detect,enhance]'          # models; core alone runs degraded
 # offline smoke (no models/network):
 python src/peloton/tools/process_photo.py --image group.jpg --out-dir out/ --use-mock
 
-# a folder → tight portrait + a print-ready 4×6 (1200×1800) per rider:
+# a folder → a tight _single + a wider _context per rider, cleaned up, native
+# detail, lossless 16-bit TIFF (drop --out-format for 8-bit JPEG):
+python src/peloton/tools/batch_photos.py --in-dir photos/ --out-dir out/ \
+    --require-bike --context --auto-brighten --out-format tiff
+
+# or a tight portrait + a print-ready 4×6 (1200×1800) per rider:
 python src/peloton/tools/batch_photos.py --in-dir photos/ --out-dir out/ \
     --require-bike --frame both --size 1200x1800
 
@@ -74,7 +95,7 @@ src/peloton/tools/
   group_riders   cull_blurry                                  (+ .sh wrappers)
   _peloton_tools/  images crop detect segment enhance quality recognize
                    pipeline peloton_mocks sidecar storage
-tests/             offline suite (29 tests, no network/models via --use-mock)
+tests/             offline suite (40 tests, no network/models via --use-mock)
 ```
 
 ## Tests
@@ -87,4 +108,5 @@ pip install pytest pillow && pytest tests/ -q     # all offline
 
 - **Face grouping** is imperfect on helmeted/sunglassed cyclists (weak embeddings);
   `--threshold` tunes precision/recall. Bib-number OCR would identify riders better.
-- **NEF/RAW** decode path is wired + LibRaw-verified but not yet run on a real NEF.
+- **NEF/RAW** decode is validated end-to-end on real Nikon `.NEF` (8-bit and 16-bit),
+  including a 1442-photo 45 MP run.

@@ -31,9 +31,11 @@ def test_process_photo_writes_one_output_per_rider(photo, tmp_path):
     out = tmp_path / "out"
     # Force the non-ML backends so the offline suite stays fast + deterministic
     # regardless of whether the .[enhance] models are installed on the host.
+    # upscale_mode="always" exercises the (lanczos) upscale path explicitly — the
+    # default "auto" leaves an already-large crop at native resolution.
     summary = pipeline.process_photo(
         photo, out, use_mock=True, scale=2, restore_faces=True,
-        upscale_backend="lanczos", face_backend="none")
+        upscale_backend="lanczos", face_backend="none", upscale_mode="always")
     assert summary["n_riders"] == 3
     assert len(summary["riders"]) == 3
     for r in summary["riders"]:
@@ -45,6 +47,33 @@ def test_process_photo_writes_one_output_per_rider(photo, tmp_path):
         assert r["face_backend"] == "none"
     # 3 files on disk
     assert len(list(out.glob("group_rider*.jpg"))) == 3
+
+
+def test_default_single_is_native_not_upscaled(photo, tmp_path):
+    # New default: a tight single crop keeps its native pixels (no ML upscale) —
+    # 4x-upscaling-then-downscaling a sharp crop softens it.
+    out = tmp_path / "native"
+    summary = pipeline.process_photo(
+        photo, out, use_mock=True, restore_faces=False, face_backend="none")
+    for r in summary["riders"]:
+        assert r["upscale_backend"] == "native"
+        # output width equals the source crop width (native, not enlarged)
+        assert r["output_size"][0] == (r["focus_box"][2] - r["focus_box"][0])
+
+
+def test_context_emits_wider_second_output(photo, tmp_path):
+    # context=True adds a _context crop that is wider than the tight _single.
+    out = tmp_path / "ctx"
+    summary = pipeline.process_photo(
+        photo, out, use_mock=True, restore_faces=False, face_backend="none",
+        frame="single", context=True)
+    for r in summary["riders"]:
+        outs = {o["label"]: o for o in r["outputs"]}
+        assert set(outs) == {"single", "context"}
+        assert outs["context"]["output_size"][0] > outs["single"]["output_size"][0]
+        assert Path(outs["context"]["output"]).name.endswith("_context.jpg")
+    assert len(list(out.glob("group_rider*_context.jpg"))) == 3
+    assert len(list(out.glob("group_rider*_single.jpg"))) == 3
 
 
 def test_process_photo_segment_mock_writes_cutouts(photo, tmp_path):

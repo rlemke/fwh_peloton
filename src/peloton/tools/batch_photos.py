@@ -63,6 +63,19 @@ def main() -> int:
     ap.add_argument("--fidelity", type=float, default=0.7)
     ap.add_argument("--model", default="yolo11x.pt")
     ap.add_argument("--upscale-backend", default="auto")
+    ap.add_argument("--upscale-mode", choices=["auto", "never", "always"], default="auto",
+                    help="auto=upscale only when a crop is smaller than its target "
+                         "(skips ESRGAN on already-sharp high-res crops); never/always override")
+    ap.add_argument("--context", action="store_true",
+                    help="also emit a wider _context crop that captures surrounding riders (no fixed aspect)")
+    ap.add_argument("--context-reach", type=float, default=0.6,
+                    help="how far (fraction of the rider box) the _context crop reaches for neighbours")
+    ap.add_argument("--no-dehaze", action="store_true",
+                    help="disable the haze/contrast/colour cleanup (on by default)")
+    ap.add_argument("--native-sharpen", type=float, default=80.0,
+                    help="unsharp %% on native (non-upscaled) outputs (0 disables)")
+    ap.add_argument("--out-format", choices=["jpg", "tiff"], default="jpg",
+                    help="jpg=8-bit lossy (default); tiff=lossless 16-bit (max fidelity, big files)")
     ap.add_argument("--face-backend", default="auto")
     ap.add_argument("--resume", action="store_true",
                     help="skip source photos already recorded in <out>/manifest.json (resumable run)")
@@ -144,6 +157,9 @@ def main() -> int:
                 restore_faces=not a.no_face_restore, fidelity=a.fidelity,
                 use_mock=a.use_mock, detect_model=a.model,
                 upscale_backend=a.upscale_backend, face_backend=a.face_backend,
+                dehaze=not a.no_dehaze, context=a.context, context_reach=a.context_reach,
+                native_sharpen=a.native_sharpen, upscale_mode=a.upscale_mode,
+                out_format=a.out_format,
             )
             dt = time.time() - t0
             n_ok += 1

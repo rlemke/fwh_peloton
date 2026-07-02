@@ -90,6 +90,49 @@ def _load_raw(path: Path) -> Any:
     return Image.fromarray(np.ascontiguousarray(rgb)).convert("RGB")
 
 
+def load_image16(path: str | Path) -> Any:
+    """Load an image as a 16-bit RGB numpy array (H, W, 3) ``uint16``.
+
+    Camera RAW is decoded straight to 16-bit (``output_bps=16``) so the full
+    ~14-bit sensor tonal range survives into the enhancement math — this is what
+    makes a heavy auto-brighten/dehaze stretch banding-free. Non-RAW inputs have
+    no >8-bit data, so they are lifted 8→16 bit (×257) for a uniform pipeline.
+    Orientation is already applied (LibRaw for RAW, EXIF for the rest).
+    """
+    import numpy as np  # noqa: PLC0415
+
+    p = Path(path)
+    if not p.is_file():
+        raise FileNotFoundError(f"image not found: {p}")
+    if p.suffix.lower() in RAW_EXTS:
+        try:
+            import rawpy  # noqa: PLC0415
+        except ImportError as exc:
+            raise RuntimeError(
+                f"{p.suffix} is a camera RAW format — needs rawpy. "
+                "Install it: pip install '.[raw]'"
+            ) from exc
+        with rawpy.imread(str(p)) as raw:
+            rgb = raw.postprocess(use_camera_wb=True, no_auto_bright=False, output_bps=16)
+        return np.ascontiguousarray(rgb)                 # uint16 HxWx3, oriented
+    return (np.asarray(load_image(p), dtype=np.uint16) * 257)  # 8-bit → 16-bit range
+
+
+def save_tiff16(arr: Any, path: str | Path, dpi: int | None = None) -> Path:
+    """Write a 16-bit RGB ``uint16`` (H, W, 3) array as a lossless (deflate) TIFF.
+    No DCT/8-bit quantization — the archival, maximum-fidelity output."""
+    import tifffile  # noqa: PLC0415
+
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    kw: dict[str, Any] = {"photometric": "rgb", "compression": "deflate"}
+    if dpi:
+        kw["resolution"] = (dpi, dpi)
+    tifffile.imwrite(str(p), arr, **kw)
+    log.debug("wrote %s (%dx%d, 16-bit)", p, arr.shape[1], arr.shape[0])
+    return p
+
+
 def save_image(img: Any, path: str | Path, quality: int = 92,
                dpi: int | None = None) -> Path:
     """Save an image, creating parent dirs. JPEG by extension, else PNG-ish.
@@ -101,13 +144,25 @@ def save_image(img: Any, path: str | Path, quality: int = 92,
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     params: dict[str, Any] = {}
-    if p.suffix.lower() in {".jpg", ".jpeg"}:
+    is_jpeg = p.suffix.lower() in {".jpg", ".jpeg"}
+    if is_jpeg:
         params = {"quality": quality, "optimize": True}
         if img.mode != "RGB":
             img = img.convert("RGB")
+        # `optimize=True` can overflow libjpeg's per-scanline buffer on very
+        # high-entropy images ("broken data stream when writing image file" /
+        # "Suspension not allowed here"). Raise MAXBLOCK to cover the whole image.
+        from PIL import ImageFile  # noqa: PLC0415
+        ImageFile.MAXBLOCK = max(ImageFile.MAXBLOCK, img.width * img.height)
     if dpi:
         params["dpi"] = (dpi, dpi)
-    img.save(p, **params)
+    try:
+        img.save(p, **params)
+    except OSError:
+        if not is_jpeg:
+            raise
+        params.pop("optimize", None)          # last resort: unoptimized encode
+        img.save(p, **params)
     log.debug("wrote %s (%dx%d)", p, img.width, img.height)
     return p
 

@@ -80,6 +80,31 @@ def iou(a: Box, b: Box) -> float:
     return inter / denom if denom > 0 else 0.0
 
 
+def intersects(a: Box, b: Box) -> bool:
+    """True if two boxes overlap with positive area."""
+    return (max(a[0], b[0]) < min(a[2], b[2])
+            and max(a[1], b[1]) < min(a[3], b[3]))
+
+
+def context_box(base: Box, others: list[Box], width: int, height: int,
+                *, reach: float = 0.6, margin: float = 0.08) -> Box:
+    """A wider crop around ``base`` that also takes in nearby riders — no target
+    aspect ratio, the box is simply whatever encloses the rider and their
+    neighbours.
+
+    Expand ``base`` by ``reach`` (fraction of its own size) into a neighbourhood,
+    union in every ``others`` box that overlaps that neighbourhood, then add a
+    small ``margin`` and clamp. With no neighbours nearby it degrades to just a
+    wider, contextual view of the one rider (the neighbourhood itself).
+    """
+    neigh = pad_box(base, reach, width, height)
+    boxes: list[Box] = [neigh]
+    for o in others:
+        if o is not None and intersects(neigh, o):
+            boxes.append(o)
+    return pad_box(union(*boxes), margin, width, height)
+
+
 def pad_box(box: Box, pad_frac: float, width: int, height: int) -> Box:
     """Expand a box by ``pad_frac`` of its own size on each side, then clamp to
     the image. ``pad_frac=0.15`` adds 15% margin so heads/wheels aren't clipped.

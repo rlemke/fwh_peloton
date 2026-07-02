@@ -66,6 +66,113 @@ def auto_brighten(img: Any, meter: Any = None, target: float = 120.0,
     return out, round(gamma, 3)
 
 
+def dehaze(img: Any, *, black_pct: float = 1.0, white_pct: float = 99.0,
+           black_to: int = 8, white_to: int = 247,
+           contrast: float = 1.10, color: float = 1.35) -> Any:
+    """Remove the low-contrast "haze"/veiling wash: stretch the luminance black &
+    white points — per-image percentiles, so true blacks and highlights are
+    restored — then a mild contrast + colour lift. Adaptive: it self-tunes to each
+    photo's haze and is near-identity on an already-contrasty frame. Preserves
+    alpha. Returns the corrected image.
+
+    These photos come off the camera flat (lifted blacks ~40, muted colour); this
+    is the "clean it up" pass. Purely tonal — it adds no sharpness and removes no
+    detail (that is governed by whether the crop is up-scaled, see the pipeline).
+    """
+    import numpy as np  # noqa: PLC0415
+
+    from PIL import Image, ImageEnhance  # noqa: PLC0415
+
+    alpha = img.getchannel("A") if img.mode == "RGBA" else None
+    rgb = img.convert("RGB")
+    a = np.asarray(rgb, dtype=np.float32)
+    lum = a.mean(axis=2)
+    lo = float(np.percentile(lum, black_pct))
+    hi = float(np.percentile(lum, white_pct))
+    if hi - lo > 1.0:                       # stretch black/white points to remove the veil
+        scale = (white_to - black_to) / (hi - lo)
+        a = np.clip((a - lo) * scale + black_to, 0.0, 255.0)
+        rgb = Image.fromarray(a.astype("uint8"), "RGB")
+    if contrast != 1.0:
+        rgb = ImageEnhance.Contrast(rgb).enhance(contrast)
+    if color != 1.0:
+        rgb = ImageEnhance.Color(rgb).enhance(color)
+    if alpha is not None:
+        rgb = rgb.convert("RGBA")
+        rgb.putalpha(alpha)
+    log.info("dehaze: black/white point %.0f/%.0f → %d/%d, contrast %.2f colour %.2f",
+             lo, hi, black_to, white_to, contrast, color)
+    return rgb
+
+
+# ---------------------------------------------------------------------------
+# 16-bit numpy variants (for the lossless TIFF output path). PIL's ImageEnhance /
+# UnsharpMask are 8-bit only, so the tonal ops are re-implemented on uint16 arrays
+# in float32, keeping the ~14-bit RAW range intact through a heavy stretch.
+# ---------------------------------------------------------------------------
+
+_LUMA = (0.299, 0.587, 0.114)
+
+
+def auto_brighten16(arr: Any, meter: Any = None, target: float = 120.0,
+                    max_gamma: float = 2.4) -> tuple[Any, float]:
+    """16-bit gamma brighten — see ``auto_brighten``. ``arr``/``meter`` are uint16
+    (H,W,3); ``target`` is on the 0..255 scale. Returns ``(uint16, gamma)``."""
+    import numpy as np  # noqa: PLC0415
+
+    lw = np.asarray(_LUMA, np.float32)
+    region = meter if meter is not None else arr
+    m = float((region.astype(np.float32) @ lw).mean()) / 65535.0
+    tf = target / 255.0
+    if m <= 1e-4 or m >= tf:
+        return arr, 1.0
+    gamma = min(max_gamma, math.log(m) / math.log(tf))
+    if gamma <= 1.001:
+        return arr, 1.0
+    x = arr.astype(np.float32) / 65535.0
+    out = np.power(x, 1.0 / gamma) * 65535.0
+    log.info("auto-brighten16: region mean %.0f → gamma %.2f", m * 65535, gamma)
+    return np.clip(out, 0, 65535).astype(np.uint16), round(gamma, 3)
+
+
+def dehaze16(arr: Any, *, black_pct: float = 1.0, white_pct: float = 99.0,
+             black_to: int = 8, white_to: int = 247,
+             contrast: float = 1.10, color: float = 1.35) -> Any:
+    """16-bit dehaze — see ``dehaze``. Black/white-point stretch + contrast + colour
+    on a uint16 (H,W,3) array, all in float32 so the stretch stays banding-free."""
+    import numpy as np  # noqa: PLC0415
+
+    lw = np.asarray(_LUMA, np.float32)
+    a = arr.astype(np.float32)
+    luma = a @ lw
+    lo = float(np.percentile(luma, black_pct))
+    hi = float(np.percentile(luma, white_pct))
+    b16, w16 = black_to * 257.0, white_to * 257.0
+    if hi - lo > 257.0:
+        a = np.clip((a - lo) * ((w16 - b16) / (hi - lo)) + b16, 0, 65535)
+    if contrast != 1.0:
+        pivot = float((a @ lw).mean())
+        a = np.clip(pivot + (a - pivot) * contrast, 0, 65535)
+    if color != 1.0:
+        lum = (a @ lw)[..., None]
+        a = np.clip(lum + (a - lum) * color, 0, 65535)
+    log.info("dehaze16: black/white point %.0f/%.0f → %d/%d", lo, hi, int(b16), int(w16))
+    return a.astype(np.uint16)
+
+
+def unsharp16(arr: Any, radius: float = 2.2, amount: float = 0.8) -> Any:
+    """16-bit unsharp mask (cv2 gaussian) on a uint16 (H,W,3) array. ``amount`` is
+    a fraction (native_sharpen%/100); 0 disables."""
+    if amount <= 0:
+        return arr
+    import cv2  # noqa: PLC0415
+    import numpy as np  # noqa: PLC0415
+
+    a = arr.astype(np.float32)
+    blur = cv2.GaussianBlur(a, (0, 0), sigmaX=float(radius))
+    return np.clip(a + amount * (a - blur), 0, 65535).astype(np.uint16)
+
+
 def _torch_device() -> str:
     """MPS (Apple GPU) → CUDA → CPU, overridable with FW_PELOTON_DEVICE."""
     dev = os.environ.get("FW_PELOTON_DEVICE")
