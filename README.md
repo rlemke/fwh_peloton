@@ -24,7 +24,9 @@ Two enhancement fixes matter for high-resolution sources (e.g. 45 MP DSLR RAW):
 
 **Output:** `--out-format jpg` (default, 8-bit) or **`tiff`** (lossless **16-bit** —
 decodes RAW at 16-bit and does the tonal math in 16-bit so a heavy brighten/dehaze
-stretch stays banding-free; the archival master, large files).
+stretch stays banding-free; the archival master, large files). Keep the TIFFs as
+masters and derive shareable JPEGs on the side with **`tiffs-to-jpegs`** (a separate
+`--in-dir`/`--out-dir` step, no re-processing).
 
 A Facetwork domain package following the tools/handlers pattern. This ships the
 reusable **library + CLI tools** (`src/peloton/tools/`); the FFL handlers/workflow
@@ -46,6 +48,7 @@ mix any of these — each file is decoded by its own format.
 | `batch-photos`   | Run the pipeline over a whole directory (reuses models; running `manifest.json`) |
 | `group-riders`   | Cluster the crops by face → one `rider_NNN/` folder per person, best-shot first |
 | `cull-blurry`    | Score focus; move out-of-focus photos to `_unfocused/` |
+| `tiffs-to-jpegs` | Derive shareable 8-bit JPEGs from a directory of 16-bit TIFF masters (separate step) |
 
 Every tool: JSON on **stdout**, logs on **stderr**, `--use-mock` (offline, no
 models), `--log-level`. Full reference + the graceful-degradation backends,
@@ -71,6 +74,9 @@ python src/peloton/tools/batch_photos.py --in-dir photos/ --out-dir out/ \
 # organize + cull:
 python src/peloton/tools/group_riders.py --in-dir out/ --out-dir out/by_rider
 python src/peloton/tools/cull_blurry.py  --in-dir photos/ --min-sharpness 900
+
+# derive shareable JPEGs from the 16-bit TIFF masters (separate, idempotent step):
+python src/peloton/tools/tiffs_to_jpegs.py --in-dir out/ --out-dir out_jpg/
 ```
 
 ## Extras (optional, lazy-imported — the pipeline degrades gracefully without them)
@@ -92,10 +98,10 @@ backend actually ran.
 ```
 src/peloton/tools/
   detect_riders  crop_riders  enhance_image  process_photo  batch_photos
-  group_riders   cull_blurry                                  (+ .sh wrappers)
+  group_riders   cull_blurry  tiffs_to_jpegs                  (+ .sh wrappers)
   _peloton_tools/  images crop detect segment enhance quality recognize
                    pipeline peloton_mocks sidecar storage
-tests/             offline suite (40 tests, no network/models via --use-mock)
+tests/             offline suite (43 tests, no network/models via --use-mock)
 ```
 
 ## Tests

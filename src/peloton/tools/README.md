@@ -42,6 +42,7 @@ terminal and (later) from an FFL handler.
 | `process-photo`  | The whole pipeline: photo → per-rider enhanced portraits |
 | `batch-photos`   | Run the pipeline over a whole directory (model reuse) |
 | `group-riders`   | Cluster the per-rider crops by face → one `rider_NNN/` folder per person, best-shot first |
+| `tiffs-to-jpegs` | Derive shareable 8-bit JPEGs from a dir of 16-bit TIFF masters (separate, idempotent step) |
 
 ### Organize & identify (`group-riders`)
 
@@ -110,6 +111,18 @@ framed`/`--match-input`). Big files (a 19 MP `_context` ≈ 110 MB).
 # cleaned up, tight + surrounding-context, lossless 16-bit:
 batch_photos.py --in-dir photos/ --out-dir out/ --require-bike \
     --context --auto-brighten --out-format tiff
+```
+
+### Derive JPEGs from the TIFF masters (`tiffs-to-jpegs`)
+
+Keep the 16-bit `.tif` files as archival masters and produce shareable 8-bit JPEGs
+in a *separate* directory — a pure format conversion (65535→255 downconvert, same
+filename stem), no re-detection or re-enhancement, so it's fast and re-runnable
+(existing outputs are skipped unless `--overwrite`). `--quality` defaults to 100.
+
+```bash
+tiffs_to_jpegs.py --in-dir out/ --out-dir out_jpg/            # q100, skip existing
+tiffs_to_jpegs.py --in-dir out/ --out-dir out_jpg/ --quality 95 --overwrite
 ```
 
 ## Backends (graceful degradation)

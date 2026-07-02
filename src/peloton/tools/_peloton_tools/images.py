@@ -133,6 +133,24 @@ def save_tiff16(arr: Any, path: str | Path, dpi: int | None = None) -> Path:
     return p
 
 
+def tiff_to_image8(path: str | Path) -> Any:
+    """Read a TIFF (16-bit or 8-bit) as an 8-bit RGB ``PIL.Image`` — the derive-JPEG
+    downconvert. 16-bit is scaled 65535→255 (÷257, rounded); grayscale is expanded
+    to RGB and any alpha/extra channels are dropped."""
+    import numpy as np  # noqa: PLC0415
+    import tifffile  # noqa: PLC0415
+
+    Image = _pil()
+    a = tifffile.imread(str(path))
+    if a.dtype == np.uint16:
+        a = np.clip(np.rint(a / 257.0), 0, 255).astype(np.uint8)
+    elif a.dtype != np.uint8:
+        a = np.clip(a, 0, 255).astype(np.uint8)
+    if a.ndim == 2:
+        return Image.fromarray(a).convert("RGB")
+    return Image.fromarray(a[:, :, :3]).convert("RGB")
+
+
 def save_image(img: Any, path: str | Path, quality: int = 92,
                dpi: int | None = None) -> Path:
     """Save an image, creating parent dirs. JPEG by extension, else PNG-ish.
