@@ -30,9 +30,12 @@ raw = ["rawpy>=0.19"]  # decode camera RAW (.nef/.cr2/.arw/.dng/…)
 s3 = ["boto3>=1.28"]
 test = ["pytest>=7.4"]
 
-# NOTE: the facetwork.domains entry point + handlers/ + ffl/ are the next phase
-# (turning these tools into a workflow). Left out until the handlers land so the
-# package installs as a plain, standalone tools library for now.
+# FFL-workflow layer: install '.[domain]' to run peloton as a Facetwork workflow
+# (the facetwork runtime). The tools/library install fine without it.
+domain = ["facetwork>=0.31.0"]
+
+[project.entry-points."facetwork.domains"]
+peloton = "peloton:domain"
 
 [tool.setuptools.packages.find]
 where = ["src"]

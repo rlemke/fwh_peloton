@@ -1,0 +1,54 @@
+// fwh_peloton — group cycling photo → per-rider enhanced portraits, as FFL.
+//
+// Image data flows BY REFERENCE (filesystem / MinIO paths), not inline — each
+// event facet is a whole-photo operation that reads a path and writes output
+// files, returning their paths. This mirrors how the CLIs (process_photo /
+// batch_photos / nef_to_tif) are actually used.
+
+namespace peloton {
+    schema PhotoList { paths: Json, count: Long }
+    schema PortraitResult { n_riders: Long, outputs: Json }
+}
+
+namespace peloton.Ingest {
+    /** List the processable image/RAW files in a directory (returns their paths). */
+    event facet ListImages(in_dir: String) => (paths: Json, count: Long)
+        with Effect(kind = "io")
+
+    /** Convert one RAW/image to a full-resolution 16-bit TIFF — verbatim, no crop
+        or enhancement (a 45 MP NEF → an 8288x5520 16-bit TIFF). */
+    event facet ConvertRaw(image_path: String, out_dir: String, highlight_mode: String = "clip") => (output: String)
+        with Effect(kind = "io")
+}
+
+namespace peloton.Portraits {
+    /** Detect riders in one photo and write one enhanced portrait per rider — a
+        tight _single crop + a wider _context crop. Returns the rider count and the
+        output file paths. */
+    event facet ProcessPhoto(image_path: String, out_dir: String, require_bike: Boolean = true, context: Boolean = true, auto_brighten: Boolean = true, out_format: String = "tiff") => (n_riders: Long, outputs: Json)
+        with Effect(kind = "io")
+}
+
+namespace peloton.workflows {
+    use peloton.Ingest
+    use peloton.Portraits
+
+    /** One photo → per-rider portraits. */
+    workflow ProcessOnePhoto(image_path: String, out_dir: String) => (n_riders: Long) andThen {
+        done = ProcessPhoto(image_path = $.image_path, out_dir = $.out_dir)
+        yield ProcessOnePhoto(n_riders = done.n_riders)
+    }
+
+    /** Many photos → per-rider portraits: fan out one ProcessPhoto step per photo
+        (parallel across the fleet). Get ``paths`` from ListImages(in_dir). */
+    workflow ProcessBatch(paths: Json, out_dir: String) => (count: Long) andThen foreach path in $.paths {
+        done = ProcessPhoto(image_path = $.path, out_dir = $.out_dir)
+        yield ProcessBatch(count = 1)
+    }
+
+    /** Convert many RAW files → full-resolution 16-bit TIFF (fan out per file). */
+    workflow ConvertBatch(paths: Json, out_dir: String) => (count: Long) andThen foreach path in $.paths {
+        done = ConvertRaw(image_path = $.path, out_dir = $.out_dir)
+        yield ConvertBatch(count = 1)
+    }
+}

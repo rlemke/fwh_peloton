@@ -49,6 +49,7 @@ mix any of these — each file is decoded by its own format.
 | `group-riders`   | Cluster the crops by face → one `rider_NNN/` folder per person, best-shot first |
 | `cull-blurry`    | Score focus; move out-of-focus photos to `_unfocused/` |
 | `tiffs-to-jpegs` | Derive shareable 8-bit JPEGs from a directory of 16-bit TIFF masters (separate step) |
+| `nef-to-tif`     | Verbatim RAW → 16-bit TIFF at the **original** sensor resolution (no crop/enhance) |
 
 Every tool: JSON on **stdout**, logs on **stderr**, `--use-mock` (offline, no
 models), `--log-level`. Full reference + the graceful-degradation backends,
@@ -77,6 +78,28 @@ python src/peloton/tools/cull_blurry.py  --in-dir photos/ --min-sharpness 900
 
 # derive shareable JPEGs from the 16-bit TIFF masters (separate, idempotent step):
 python src/peloton/tools/tiffs_to_jpegs.py --in-dir out/ --out-dir out_jpg/
+
+# verbatim RAW → 16-bit TIFF at original resolution (a 45 MP NEF → 8288×5520):
+python src/peloton/tools/nef_to_tif.py --in-dir raws/ --out-dir tifs/
+```
+
+## Run as an FFL workflow
+
+The tools are also exposed as a Facetwork domain (`facetwork.domains` entry point +
+`handlers/` + `ffl/peloton.ffl`), so the pipeline runs on the runtime / fleet.
+
+Event facets (image data flows **by reference** — file/MinIO paths):
+- `peloton.Portraits.ProcessPhoto(image_path, out_dir, …)` → `(n_riders, outputs)`
+- `peloton.Ingest.ConvertRaw(image_path, out_dir, highlight_mode)` → `(output)`
+- `peloton.Ingest.ListImages(in_dir)` → `(paths, count)`
+
+Workflows: `ProcessOnePhoto`, `ProcessBatch(paths, out_dir)` (fan out per photo),
+`ConvertBatch(paths, out_dir)`.
+
+```bash
+pip install -e '.[detect,enhance,raw,domain]'        # domain = the facetwork runtime
+facetwork compile src/peloton/ffl/peloton.ffl --check # validate the FFL
+python -m facetwork.domains --seed peloton            # register handlers + seed the flows
 ```
 
 ## Extras (optional, lazy-imported — the pipeline degrades gracefully without them)
@@ -88,6 +111,7 @@ python src/peloton/tools/tiffs_to_jpegs.py --in-dir out/ --out-dir out_jpg/
 | `recognize` | Same-rider grouping (insightface/onnxruntime) |
 | `raw`       | Camera RAW decode (rawpy/LibRaw) |
 | `s3`        | S3/MinIO storage (boto3) |
+| `domain`    | Run as an FFL workflow on the Facetwork runtime (facetwork) |
 
 Model weights auto-cache to `~/.cache/peloton/weights`. Without a backend, upscale
 falls back to Lanczos and face-restore to passthrough; each run records which
@@ -96,12 +120,15 @@ backend actually ran.
 ## Layout
 
 ```
-src/peloton/tools/
-  detect_riders  crop_riders  enhance_image  process_photo  batch_photos
-  group_riders   cull_blurry  tiffs_to_jpegs                  (+ .sh wrappers)
-  _peloton_tools/  images crop detect segment enhance quality recognize
-                   pipeline peloton_mocks sidecar storage
-tests/             offline suite (43 tests, no network/models via --use-mock)
+src/peloton/
+  tools/
+    detect_riders crop_riders enhance_image process_photo batch_photos
+    group_riders  cull_blurry tiffs_to_jpegs nef_to_tif       (+ .sh wrappers)
+    _peloton_tools/  images crop detect segment enhance quality recognize
+                     pipeline peloton_mocks sidecar storage
+  ffl/peloton.ffl    event facets + workflows
+  handlers/          ingest/ + portraits/ (RegistryRunner dispatch) + shared/ shim
+tests/               offline suite (48 tests, no network/models via --use-mock)
 ```
 
 ## Tests

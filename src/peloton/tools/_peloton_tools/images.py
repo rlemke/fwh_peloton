@@ -90,7 +90,7 @@ def _load_raw(path: Path) -> Any:
     return Image.fromarray(np.ascontiguousarray(rgb)).convert("RGB")
 
 
-def load_image16(path: str | Path) -> Any:
+def load_image16(path: str | Path, *, highlight_mode: str = "clip") -> Any:
     """Load an image as a 16-bit RGB numpy array (H, W, 3) ``uint16``.
 
     Camera RAW is decoded straight to 16-bit (``output_bps=16``) so the full
@@ -98,6 +98,10 @@ def load_image16(path: str | Path) -> Any:
     makes a heavy auto-brighten/dehaze stretch banding-free. Non-RAW inputs have
     no >8-bit data, so they are lifted 8→16 bit (×257) for a uniform pipeline.
     Orientation is already applied (LibRaw for RAW, EXIF for the rest).
+
+    ``highlight_mode`` (RAW only): ``clip`` (default, LibRaw mode 0), ``blend``
+    (gentle rolloff, mode 2) or ``reconstruct`` (mode 5) — recover blown highlights
+    from any channel that stayed below clipping. No effect on non-RAW inputs.
     """
     import numpy as np  # noqa: PLC0415
 
@@ -112,8 +116,10 @@ def load_image16(path: str | Path) -> Any:
                 f"{p.suffix} is a camera RAW format — needs rawpy. "
                 "Install it: pip install '.[raw]'"
             ) from exc
+        hl = {"clip": 0, "blend": 2, "reconstruct": 5}.get(highlight_mode, 0)
         with rawpy.imread(str(p)) as raw:
-            rgb = raw.postprocess(use_camera_wb=True, no_auto_bright=False, output_bps=16)
+            rgb = raw.postprocess(use_camera_wb=True, output_bps=16, highlight_mode=hl,
+                                  no_auto_bright=(hl != 0))
         return np.ascontiguousarray(rgb)                 # uint16 HxWx3, oriented
     return (np.asarray(load_image(p), dtype=np.uint16) * 257)  # 8-bit → 16-bit range
 
