@@ -81,6 +81,8 @@ python src/peloton/tools/tiffs_to_jpegs.py --in-dir out/ --out-dir out_jpg/
 
 # verbatim RAW → 16-bit TIFF at original resolution (a 45 MP NEF → 8288×5520):
 python src/peloton/tools/nef_to_tif.py --in-dir raws/ --out-dir tifs/
+# …or recurse a whole tree, mirroring the input directory structure (resumable):
+python src/peloton/tools/nef_to_tif.py --in-dir shoots/ --out-dir tifs/ --recursive --resume
 ```
 
 ## Run as an FFL workflow

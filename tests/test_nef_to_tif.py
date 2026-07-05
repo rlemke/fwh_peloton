@@ -41,3 +41,24 @@ def test_convert_dir_resume_skips(img_dir, tmp_path):
     nef_to_tif.convert_dir(img_dir, out)
     again = nef_to_tif.convert_dir(img_dir, out, resume=True)
     assert again["converted"] == 0 and again["skipped"] == 2
+
+
+def test_convert_tree_mirrors_structure(tmp_path):
+    from PIL import Image
+    src = tmp_path / "in"
+    (src / "eventA" / "D850").mkdir(parents=True)
+    (src / "eventB").mkdir(parents=True)
+    rng = np.random.default_rng(6)
+    for rel in ("eventA/D850/a.jpg", "eventA/D850/b.jpg", "eventB/c.jpg"):
+        Image.fromarray(rng.integers(0, 256, (80, 100, 3)).astype("uint8")).save(src / rel)
+    out = tmp_path / "out"
+    # exts override so the test can use JPEGs (no rawpy needed)
+    s = nef_to_tif.convert_tree(src, out, exts={".jpg"})
+    assert s["total"] == 3 and s["converted"] == 3 and s["failed"] == 0
+    # relative directory structure is preserved, .NEF/.jpg → .tif
+    assert (out / "eventA" / "D850" / "a.tif").is_file()
+    assert (out / "eventA" / "D850" / "b.tif").is_file()
+    assert (out / "eventB" / "c.tif").is_file()
+    assert (out / "_nef2tif_manifest.json").is_file()
+    a = tifffile.imread(out / "eventB" / "c.tif")
+    assert a.dtype == np.uint16 and a.shape == (80, 100, 3)
