@@ -83,6 +83,8 @@ python src/peloton/tools/tiffs_to_jpegs.py --in-dir out/ --out-dir out_jpg/
 python src/peloton/tools/nef_to_tif.py --in-dir raws/ --out-dir tifs/
 # …or recurse a whole tree, mirroring the input directory structure (resumable):
 python src/peloton/tools/nef_to_tif.py --in-dir shoots/ --out-dir tifs/ --recursive --resume
+# converts in parallel by default (--workers auto): sizes to free CPUs, ramps up
+# while there's headroom and backs off when the box saturates. Pin with --workers N.
 ```
 
 ## Run as an FFL workflow

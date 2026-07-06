@@ -62,3 +62,25 @@ def test_convert_tree_mirrors_structure(tmp_path):
     assert (out / "_nef2tif_manifest.json").is_file()
     a = tifffile.imread(out / "eventB" / "c.tif")
     assert a.dtype == np.uint16 and a.shape == (80, 100, 3)
+
+
+def test_resolve_workers():
+    start, cap, adaptive = nef_to_tif._resolve_workers("auto")
+    assert 1 <= start <= cap and adaptive is True     # auto → free-CPU sized, adaptive
+    s2, c2, ad2 = nef_to_tif._resolve_workers(3)
+    assert s2 == 3 and c2 == 3 and ad2 is False        # pinned worker count
+    s1, _, _ = nef_to_tif._resolve_workers(1)
+    assert s1 == 1                                      # serial
+
+
+def test_convert_tree_fixed_workers(tmp_path):
+    from PIL import Image
+    src = tmp_path / "in" / "d"
+    src.mkdir(parents=True)
+    rng = np.random.default_rng(8)
+    for n in ("a", "b", "c", "e"):
+        Image.fromarray(rng.integers(0, 256, (60, 90, 3)).astype("uint8")).save(src.parent / f"{n}.jpg")
+    out = tmp_path / "out"
+    s = nef_to_tif.convert_tree(tmp_path / "in", out, exts={".jpg"}, workers=2)
+    assert s["total"] == 4 and s["converted"] == 4 and s["failed"] == 0
+    assert len(list(out.glob("*.tif"))) == 4
