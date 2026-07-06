@@ -172,11 +172,14 @@ def _convert_many(tasks: list[tuple[Path, Path]], *, highlight_mode: str = "clip
     target = [start]
     inflight = [0]
     cond = threading.Condition()
+    t_start = time.time()
 
     def _manifest(i: int) -> None:
         if manifest_path is None:
             return
-        avg = (sum(times) / len(times)) if times else 0.0
+        # Wall-clock throughput (seconds per converted file) so the ETA is honest
+        # under parallelism — the mean per-worker time overestimates when N run at once.
+        avg = ((time.time() - t_start) / st["ok"]) if st["ok"] else 0.0
         manifest_path.write_text(json.dumps(
             {"processed": i, "total": total, "ok": st["ok"], "skipped": st["skip"],
              "failed": st["fail"], "avg_s": round(avg, 1), "workers": target[0]}, indent=2))
