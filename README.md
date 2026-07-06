@@ -49,7 +49,7 @@ mix any of these — each file is decoded by its own format.
 | `group-riders`   | Cluster the crops by face → one `rider_NNN/` folder per person, best-shot first |
 | `cull-blurry`    | Score focus; move out-of-focus photos to `_unfocused/` |
 | `tiffs-to-jpegs` | Derive shareable 8-bit JPEGs from a directory of 16-bit TIFF masters (separate step) |
-| `nef-to-tif`     | Verbatim RAW → 16-bit TIFF at the **original** sensor resolution (no crop/enhance) |
+| `convert-photos` | Convert **RAW/TIFF/JPEG → TIFF or JPEG** at any resolution (`--format`/`--resize`), recursive + adaptive-parallel. (`nef-to-tif` is a RAW→TIFF alias.) |
 
 Every tool: JSON on **stdout**, logs on **stderr**, `--use-mock` (offline, no
 models), `--log-level`. Full reference + the graceful-degradation backends,
@@ -79,12 +79,14 @@ python src/peloton/tools/cull_blurry.py  --in-dir photos/ --min-sharpness 900
 # derive shareable JPEGs from the 16-bit TIFF masters (separate, idempotent step):
 python src/peloton/tools/tiffs_to_jpegs.py --in-dir out/ --out-dir out_jpg/
 
-# verbatim RAW → 16-bit TIFF at original resolution (a 45 MP NEF → 8288×5520):
-python src/peloton/tools/nef_to_tif.py --in-dir raws/ --out-dir tifs/
-# …or recurse a whole tree, mirroring the input directory structure (resumable):
-python src/peloton/tools/nef_to_tif.py --in-dir shoots/ --out-dir tifs/ --recursive --resume
-# converts in parallel by default (--workers auto): sizes to free CPUs, ramps up
-# while there's headroom and backs off when the box saturates. Pin with --workers N.
+# convert RAW/TIFF/JPEG → TIFF or JPEG, any resolution (convert-photos):
+python src/peloton/tools/convert_photos.py --image shot.NEF --out-dir out/                    # RAW → 16-bit TIFF, full res
+python src/peloton/tools/convert_photos.py --image master.tif --out-dir out/ --format jpeg --resize 2048  # TIF → JPEG, long edge 2048
+python src/peloton/tools/convert_photos.py --in-dir jpgs/ --out-dir tifs/ --from jpg          # JPEG → TIFF
+# a whole tree, mirroring structure (RAW → JPEG @ 3000px), resumable + adaptive-parallel:
+python src/peloton/tools/convert_photos.py --in-dir shoots/ --out-dir out/ --recursive --format jpeg --resize 3000 --resume
+#   --format tif|jpeg · --quality N · --resize N|WxH|50% · --from raw|any|<ext list>
+#   --workers auto (default): sizes to free CPUs, ramps up on headroom, backs off on saturation
 ```
 
 ## Run as an FFL workflow

@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 import tifffile
 
-import nef_to_tif
+import convert_photos as nef_to_tif   # general converter (nef_to_tif is a back-compat shim)
 
 
 @pytest.fixture()
@@ -59,7 +59,7 @@ def test_convert_tree_mirrors_structure(tmp_path):
     assert (out / "eventA" / "D850" / "a.tif").is_file()
     assert (out / "eventA" / "D850" / "b.tif").is_file()
     assert (out / "eventB" / "c.tif").is_file()
-    assert (out / "_nef2tif_manifest.json").is_file()
+    assert (out / "_convert_manifest.json").is_file()
     a = tifffile.imread(out / "eventB" / "c.tif")
     assert a.dtype == np.uint16 and a.shape == (80, 100, 3)
 
@@ -84,3 +84,41 @@ def test_convert_tree_fixed_workers(tmp_path):
     s = nef_to_tif.convert_tree(tmp_path / "in", out, exts={".jpg"}, workers=2)
     assert s["total"] == 4 and s["converted"] == 4 and s["failed"] == 0
     assert len(list(out.glob("*.tif"))) == 4
+
+
+def test_parse_resize_forms():
+    assert nef_to_tif.parse_resize(None) is None
+    assert nef_to_tif.parse_resize("2048") == ("longedge", 2048)
+    assert nef_to_tif.parse_resize("800x600") == ("box", (800, 600))
+    assert nef_to_tif.parse_resize("50%") == ("scale", 0.5)
+    assert nef_to_tif.parse_resize("0.25") == ("scale", 0.25)
+
+
+def test_convert_one_to_jpeg(tmp_path):
+    from PIL import Image
+    src = tmp_path / "a.jpg"
+    Image.fromarray(np.random.default_rng(1).integers(0, 256, (120, 200, 3)).astype("uint8")).save(src)
+    out = tmp_path / "out"
+    p = nef_to_tif.convert_one(src, out, out_format="jpeg", quality=90)
+    assert p.suffix == ".jpg" and Image.open(p).mode == "RGB" and Image.open(p).size == (200, 120)
+
+
+def test_convert_one_resize_longedge(tmp_path):
+    from PIL import Image
+    src = tmp_path / "b.png"
+    Image.fromarray(np.random.default_rng(2).integers(0, 256, (400, 1000, 3)).astype("uint8")).save(src)
+    out = tmp_path / "out"
+    p = nef_to_tif.convert_one(src, out, out_format="jpeg", resize=nef_to_tif.parse_resize("500"))
+    assert max(Image.open(p).size) == 500          # long edge scaled to 500
+
+
+def test_tif_to_jpeg_roundtrip(tmp_path):
+    # write a 16-bit TIFF, then convert TIFF → JPEG (exercises the tiff-aware loader)
+    import tifffile
+    from PIL import Image
+    src = tmp_path / "m.tif"
+    tifffile.imwrite(src, (np.random.default_rng(3).integers(0, 65536, (100, 150, 3))).astype(np.uint16),
+                     photometric="rgb")
+    out = tmp_path / "out"
+    p = nef_to_tif.convert_one(src, out, out_format="jpeg")
+    assert p.suffix == ".jpg" and Image.open(p).size == (150, 100)

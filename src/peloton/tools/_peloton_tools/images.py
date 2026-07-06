@@ -108,6 +108,17 @@ def load_image16(path: str | Path, *, highlight_mode: str = "clip") -> Any:
     p = Path(path)
     if not p.is_file():
         raise FileNotFoundError(f"image not found: {p}")
+    if p.suffix.lower() in {".tif", ".tiff"}:            # keep a 16-bit TIFF's real depth
+        import tifffile  # noqa: PLC0415
+        a = tifffile.imread(str(p))
+        if a.ndim == 2:
+            a = np.stack([a] * 3, axis=-1)
+        a = a[:, :, :3]
+        if a.dtype == np.uint16:
+            return np.ascontiguousarray(a)
+        if a.dtype == np.uint8:
+            return np.ascontiguousarray(a.astype(np.uint16) * 257)
+        return np.clip(a, 0, 65535).astype(np.uint16)    # float/other → best-effort
     if p.suffix.lower() in RAW_EXTS:
         try:
             import rawpy  # noqa: PLC0415
