@@ -26,8 +26,27 @@ def test_domain_registers_expected_facets():
     assert r.names == {
         "peloton.Ingest.ListImages",
         "peloton.Ingest.ConvertRaw",
+        "peloton.Ingest.ConvertTree",
+        "peloton.Ingest.CopyTree",
         "peloton.Portraits.ProcessPhoto",
     }
+
+
+def test_convert_tree_and_copy_tree_handlers(tmp_path):
+    from PIL import Image
+
+    from peloton.handlers.ingest.ingest_handlers import handle
+    src = tmp_path / "in" / "e1"
+    src.mkdir(parents=True)
+    for n in ("a", "b"):
+        Image.fromarray(np.random.default_rng(4).integers(0, 256, (60, 90, 3)).astype("uint8")).save(src / f"{n}.jpg")
+    r1 = handle({"_facet_name": "peloton.Ingest.ConvertTree", "in_dir": str(tmp_path / "in"),
+                 "out_dir": str(tmp_path / "tif"), "from_sel": "jpg", "workers": 2})
+    assert r1 == {"converted": 2, "skipped": 0, "failed": 0}
+    r2 = handle({"_facet_name": "peloton.Ingest.CopyTree", "src": str(tmp_path / "tif"),
+                 "dst": str(tmp_path / "copy"), "workers": 2})
+    assert r2["copied"] >= 2 and r2["failed"] == 0
+    assert (tmp_path / "copy" / "e1" / "a.tif").is_file()
 
 
 def test_process_photo_handler_mock(tmp_path):

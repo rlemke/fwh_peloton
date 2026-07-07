@@ -30,9 +30,39 @@ def handle_convert_raw(params: dict[str, Any]) -> dict[str, Any]:
     return {"output": str(out)}
 
 
+def handle_convert_tree(params: dict[str, Any]) -> dict[str, Any]:
+    """Multi-threaded whole-directory/tree convert (RAW/TIFF/JPEG → TIFF/JPEG)."""
+    cp = U.convert_photos
+    in_dir = Path(params["in_dir"]).expanduser()
+    out_dir = Path(params["out_dir"]).expanduser()
+    resize = cp.parse_resize(params.get("resize") or None)
+    common = dict(highlight_mode=params.get("highlight_mode", "clip"),
+                  out_format=params.get("out_format", "tif"), resize=resize,
+                  quality=int(params.get("quality", 95)), resume=params.get("resume", True),
+                  workers=params.get("workers", "auto"))
+    if params.get("recursive", True):
+        exts = cp.parse_from(params.get("from_sel") or "raw", default=set(U.images.RAW_EXTS))
+        s = cp.convert_tree(in_dir, out_dir, exts=exts, **common)
+    else:
+        in_exts = cp.parse_from(params.get("from_sel"), default=None) \
+            if params.get("from_sel") else None
+        s = cp.convert_dir(in_dir, out_dir, in_exts=in_exts, **common)
+    return {"converted": s["converted"], "skipped": s["skipped"], "failed": s["failed"]}
+
+
+def handle_copy_tree(params: dict[str, Any]) -> dict[str, Any]:
+    """Multi-threaded recursive directory copy (structure mirrored, restart-safe)."""
+    dst = Path(params["dst"]).expanduser()
+    s = U.copytree.copy_tree(params["src"], dst, workers=params.get("workers", "auto"),
+                             manifest_path=dst / "_copy_manifest.json")
+    return {"copied": s["copied"], "skipped": s["skipped"], "failed": s["failed"]}
+
+
 _DISPATCH: dict[str, Any] = {
     f"{NAMESPACE}.ListImages": handle_list_images,
     f"{NAMESPACE}.ConvertRaw": handle_convert_raw,
+    f"{NAMESPACE}.ConvertTree": handle_convert_tree,
+    f"{NAMESPACE}.CopyTree": handle_copy_tree,
 }
 
 

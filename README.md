@@ -50,6 +50,7 @@ mix any of these — each file is decoded by its own format.
 | `cull-blurry`    | Score focus; move out-of-focus photos to `_unfocused/` |
 | `tiffs-to-jpegs` | Derive shareable 8-bit JPEGs from a directory of 16-bit TIFF masters (separate step) |
 | `convert-photos` | Convert **RAW/TIFF/JPEG → TIFF or JPEG** at any resolution (`--format`/`--resize`), recursive + adaptive-parallel. (`nef-to-tif` is a RAW→TIFF alias.) |
+| `copy-tree`      | Parallel recursive directory copy — mirror a tree, restart-safe (`--workers`) |
 
 Every tool: JSON on **stdout**, logs on **stderr**, `--use-mock` (offline, no
 models), `--log-level`. Full reference + the graceful-degradation backends,
@@ -97,10 +98,17 @@ The tools are also exposed as a Facetwork domain (`facetwork.domains` entry poin
 Event facets (image data flows **by reference** — file/MinIO paths):
 - `peloton.Portraits.ProcessPhoto(image_path, out_dir, …)` → `(n_riders, outputs)`
 - `peloton.Ingest.ConvertRaw(image_path, out_dir, highlight_mode)` → `(output)`
+- `peloton.Ingest.ConvertTree(in_dir, out_dir, out_format, resize, from_sel, …)` → `(converted, skipped, failed)` — **multi-threaded** whole-directory/tree convert (RAW/TIFF/JPEG → TIFF/JPEG)
+- `peloton.Ingest.CopyTree(src, dst, workers)` → `(copied, skipped, failed)` — **multi-threaded** recursive copy
 - `peloton.Ingest.ListImages(in_dir)` → `(paths, count)`
 
 Workflows: `ProcessOnePhoto`, `ProcessBatch(paths, out_dir)` (fan out per photo),
-`ConvertBatch(paths, out_dir)`.
+`ConvertBatch(paths, out_dir)` (fleet fan-out, one task/file), `ConvertDir(in_dir, out_dir, …)`
+(one step, multi-threaded), `CopyDir(src, dst)`.
+
+The **multi-threaded** conversion/copy engine (adaptive `--workers auto` — sizes to free
+CPUs, ramps up on headroom, backs off on saturation) is shared by the CLIs
+(`convert-photos`, `copy-tree`) and these handlers.
 
 ```bash
 pip install -e '.[detect,enhance,raw,domain]'        # domain = the facetwork runtime
@@ -129,12 +137,12 @@ backend actually ran.
 src/peloton/
   tools/
     detect_riders crop_riders enhance_image process_photo batch_photos
-    group_riders  cull_blurry tiffs_to_jpegs nef_to_tif       (+ .sh wrappers)
+    group_riders  cull_blurry tiffs_to_jpegs convert_photos copy_tree  (+ .sh wrappers)
     _peloton_tools/  images crop detect segment enhance quality recognize
-                     pipeline peloton_mocks sidecar storage
+                     pipeline copytree peloton_mocks sidecar storage
   ffl/peloton.ffl    event facets + workflows
-  handlers/          ingest/ + portraits/ (RegistryRunner dispatch) + shared/ shim
-tests/               offline suite (48 tests, no network/models via --use-mock)
+  handlers/          ingest/ (list/convert/convert-tree/copy-tree) + portraits/ + shared/ shim
+tests/               offline suite (59 tests, no network/models via --use-mock)
 ```
 
 ## Tests

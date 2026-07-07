@@ -19,6 +19,19 @@ namespace peloton.Ingest {
         or enhancement (a 45 MP NEF → an 8288x5520 16-bit TIFF). */
     event facet ConvertRaw(image_path: String, out_dir: String, highlight_mode: String = "clip") => (output: String)
         with Effect(kind = "io")
+
+    /** Convert a whole DIRECTORY (or tree) of RAW/TIFF/JPEG → TIFF or JPEG, at any
+        resolution, using the **adaptive multi-threaded** engine (workers size to the
+        free CPUs, ramp up on headroom, back off on saturation). recursive mirrors the
+        input tree into out_dir; from selects inputs (raw|any|ext list); resize is
+        N|WxH|50% (empty = original). One facet does the whole dir with N threads. */
+    event facet ConvertTree(in_dir: String, out_dir: String, out_format: String = "tif", resize: String = "", from_sel: String = "raw", recursive: Boolean = true, quality: Long = 95, workers: String = "auto") => (converted: Long, skipped: Long, failed: Long)
+        with Effect(kind = "io")
+
+    /** Recursively COPY a directory tree to another location, mirroring structure,
+        multi-threaded + restart-safe (skips same-size files already present). */
+    event facet CopyTree(src: String, dst: String, workers: String = "auto") => (copied: Long, skipped: Long, failed: Long)
+        with Effect(kind = "io")
 }
 
 namespace peloton.Portraits {
@@ -46,9 +59,23 @@ namespace peloton.workflows {
         yield ProcessBatch(count = 1)
     }
 
-    /** Convert many RAW files → full-resolution 16-bit TIFF (fan out per file). */
+    /** Convert many RAW files → full-resolution 16-bit TIFF (fan out per file across
+        the fleet — one task per photo). */
     workflow ConvertBatch(paths: Json, out_dir: String) => (count: Long) andThen foreach path in $.paths {
         done = ConvertRaw(image_path = $.path, out_dir = $.out_dir)
         yield ConvertBatch(count = 1)
+    }
+
+    /** Convert a whole directory/tree in ONE step using the multi-threaded engine
+        (RAW/TIFF/JPEG → TIFF or JPEG, any resolution). */
+    workflow ConvertDir(in_dir: String, out_dir: String, out_format: String = "tif", resize: String = "", from_sel: String = "raw") => (converted: Long) andThen {
+        done = ConvertTree(in_dir = $.in_dir, out_dir = $.out_dir, out_format = $.out_format, resize = $.resize, from_sel = $.from_sel)
+        yield ConvertDir(converted = done.converted)
+    }
+
+    /** Recursively copy a directory tree (multi-threaded). */
+    workflow CopyDir(src: String, dst: String) => (copied: Long) andThen {
+        done = CopyTree(src = $.src, dst = $.dst)
+        yield CopyDir(copied = done.copied)
     }
 }
